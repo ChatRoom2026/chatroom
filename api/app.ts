@@ -16,6 +16,7 @@ import friendsRoutes from './routes/friends.js'
 import messagesRoutes from './routes/messages.js'
 import uploadRoutes from './routes/upload.js'
 import userRoutes from './routes/user.js'
+import verificationRoutes from './routes/verification.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -34,6 +35,12 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 const uploadsPath = path.join(__dirname, '..', 'uploads')
 app.use('/uploads', express.static(uploadsPath))
 
+// 生产环境：托管前端构建产物
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.join(__dirname, '..', 'dist')
+  app.use(express.static(distPath))
+}
+
 /**
  * API Routes
  */
@@ -42,6 +49,7 @@ app.use('/api/friends', friendsRoutes)
 app.use('/api/messages', messagesRoutes)
 app.use('/api/upload', uploadRoutes)
 app.use('/api/user', userRoutes)
+app.use('/api/verification', verificationRoutes)
 
 /**
  * health
@@ -68,13 +76,24 @@ app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
 })
 
 /**
- * 404 handler
+ * 生产环境 SPA fallback - 非 API 路由返回前端页面
  */
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: 'API not found',
+if (process.env.NODE_ENV === 'production') {
+  app.use((req: Request, res: Response) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/socket.io')) {
+      res.status(404).json({ success: false, error: 'API not found' })
+      return
+    }
+    const distPath = path.join(__dirname, '..', 'dist', 'index.html')
+    res.sendFile(distPath)
   })
-})
+} else {
+  app.use((req: Request, res: Response) => {
+    res.status(404).json({
+      success: false,
+      error: 'API not found',
+    })
+  })
+}
 
 export default app

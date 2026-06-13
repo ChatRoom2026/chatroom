@@ -13,7 +13,7 @@ interface AuthState {
   token: string | null
   isLoggedIn: boolean
   login: (loginId: string, password: string) => Promise<void>
-  register: (username: string, email: string, password: string) => Promise<void>
+  register: (username: string, email: string, password: string, code?: string) => Promise<void>
   logout: () => void
   deleteAccount: () => Promise<void>
   init: () => void
@@ -47,8 +47,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     connectSocket(res.token)
   },
 
-  register: async (username, email, password) => {
-    const res = await api.register(username, email, password)
+  register: async (username, email, password, code?: string) => {
+    const res = await api.register(username, email, password, code || '')
     localStorage.setItem('token', res.token)
     localStorage.setItem('user', JSON.stringify(res.user))
     set({ user: res.user, token: res.token, isLoggedIn: true })

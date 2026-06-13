@@ -43,10 +43,10 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   // 认证
-  register(username: string, email: string, password: string) {
+  register(username: string, email: string, password: string, code: string) {
     return request<{ success: boolean; user: { id: number; username: string; email?: string; avatar?: string }; token: string }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ username, email, password }),
+      body: JSON.stringify({ username, email, password, code }),
     })
   },
 
@@ -112,6 +112,21 @@ export const api = {
     return request<{ success: boolean; url: string; type: string; originalName: string }>('/upload', {
       method: 'POST',
       body: formData,
+    })
+  },
+
+  // 验证码
+  sendVerificationCode(target: string) {
+    return request<{ success: boolean; sent: boolean; message: string }>('/verification/send', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    })
+  },
+
+  verifyCode(target: string, code: string) {
+    return request<{ success: boolean; message: string }>('/verification/verify', {
+      method: 'POST',
+      body: JSON.stringify({ target, code }),
     })
   },
 }

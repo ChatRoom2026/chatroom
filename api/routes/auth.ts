@@ -11,13 +11,40 @@ const JWT_SECRET = process.env.JWT_SECRET || 'chat-secret-key-2024'
 const JWT_EXPIRES = '7d'
 
 /**
+ * 验证验证码有效性
+ */
+function verifyCode(target: string, code: string, type: string = 'register'): { valid: boolean; error?: string } {
+  const record = db.prepare(`
+    SELECT id, code, expiresAt FROM verification_codes
+    WHERE target = ? AND type = ? AND used = 0
+    ORDER BY createdAt DESC LIMIT 1
+  `).get(target, type) as any
+
+  if (!record) {
+    return { valid: false, error: '请先获取验证码' }
+  }
+
+  if (new Date(record.expiresAt) < new Date()) {
+    return { valid: false, error: '验证码已过期，请重新获取' }
+  }
+
+  if (record.code !== code) {
+    return { valid: false, error: '验证码错误' }
+  }
+
+  // 标记为已使用
+  db.prepare('UPDATE verification_codes SET used = 1 WHERE id = ?').run(record.id)
+  return { valid: true }
+}
+
+/**
  * 用户注册
  * POST /api/auth/register
- * Body: { username, email, password }
+ * Body: { username, email, password, code }
  */
 router.post('/register', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username, email, password } = req.body
+    const { username, email, password, code } = req.body
 
     if (!username || !email || !password) {
       res.status(400).json({ success: false, error: '用户名、邮箱和密码不能为空' })
@@ -36,6 +63,18 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       res.status(400).json({ success: false, error: '请输入正确的邮箱格式' })
+      return
+    }
+
+    // 验证邮箱验证码
+    if (!code) {
+      res.status(400).json({ success: false, error: '请输入验证码' })
+      return
+    }
+
+    const verification = verifyCode(email, code)
+    if (!verification.valid) {
+      res.status(400).json({ success: false, error: verification.error })
       return
     }
 
