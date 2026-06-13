@@ -4,15 +4,16 @@ import { useAuthStore } from '@/store/authStore'
 import { useChatStore } from '@/store/chatStore'
 import { api, type Message } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
-import { ArrowLeft, Send, Paperclip, Image, FileText, Ban } from 'lucide-react'
+import { ArrowLeft, Send, Paperclip, Image, FileText, Ban, X } from 'lucide-react'
 
 export default function Chat() {
   const { friendId } = useParams<{ friendId: string }>()
   const navigate = useNavigate()
-  const [friend, setFriend] = useState<{ id: number; username: string; active?: number } | null>(null)
+  const [friend, setFriend] = useState<{ id: number; username: string; avatar?: string; active?: number } | null>(null)
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -193,8 +194,14 @@ export default function Chat() {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-semibold">
-          {friend?.username?.[0]?.toUpperCase() || '?'}
+        <div className="relative">
+          {friend?.avatar ? (
+            <img src={friend.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-semibold">
+              {friend?.username?.[0]?.toUpperCase() || '?'}
+            </div>
+          )}
         </div>
         <div>
           <h2 className="text-white font-semibold">{friend?.username || '加载中...'}</h2>
@@ -241,14 +248,14 @@ export default function Chat() {
                   )}
                   {msg.type === 'image' && (
                     <div className="space-y-1">
-                      <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" className="block">
+                      <button onClick={() => setPreviewImage(msg.fileUrl)} className="block w-full text-left">
                         <img
                           src={msg.fileUrl}
                           alt={msg.content}
                           className="max-w-60 rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
                           loading="lazy"
                         />
-                      </a>
+                      </button>
                       <p className={`text-xs text-gray-400 ${isMine ? 'text-right' : 'text-left'}`}>
                         {msg.content}
                       </p>
@@ -343,6 +350,27 @@ export default function Chat() {
           </div>
         )}
       </div>
+
+      {/* 图片预览弹窗 */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center"
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            onClick={() => setPreviewImage(null)}
+            className="absolute top-4 right-4 p-2 text-white hover:text-gray-300 bg-black/50 rounded-full transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <img
+            src={previewImage}
+            alt="预览"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   )
 }
