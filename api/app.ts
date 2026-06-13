@@ -19,6 +19,7 @@ import messagesRoutes from './routes/messages.js'
 import uploadRoutes from './routes/upload.js'
 import userRoutes from './routes/user.js'
 import verificationRoutes from './routes/verification.js'
+import downloadRoutes from './routes/download.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -49,6 +50,7 @@ app.use('/api/messages', messagesRoutes)
 app.use('/api/upload', uploadRoutes)
 app.use('/api/user', userRoutes)
 app.use('/api/verification', verificationRoutes)
+app.use('/api/download', downloadRoutes)
 
 /**
  * health

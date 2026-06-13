@@ -158,7 +158,7 @@ export default function Chat() {
       if (socket) {
         socket.emit('send_message', {
           receiverId: fid,
-          content: res.originalName || file.name,
+          content: file.name,
           type: 'file',
           fileUrl: res.url,
         })
@@ -171,16 +171,27 @@ export default function Chat() {
     }
   }
 
-  // 格式化时间
+  // 下载文件（使用服务端下载接口，保留原始文件名）
+  const handleDownloadFile = (messageId: number) => {
+    const token = localStorage.getItem('token')
+    if (!token) return
+    // 打开带认证的下载链接
+    window.open(`/api/download/${messageId}?token=${token}`, '_blank')
+  }
+
+  // 格式化时间（24小时制）
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp)
     const now = new Date()
     const isToday = date.toDateString() === now.toDateString()
-    const opts: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
+    const h = date.getHours().toString().padStart(2, '0')
+    const m = date.getMinutes().toString().padStart(2, '0')
     if (isToday) {
-      return date.toLocaleTimeString('zh-CN', opts)
+      return `${h}:${m}`
     }
-    return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', ...opts })
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    const day = date.getDate().toString().padStart(2, '0')
+    return `${month}-${day} ${h}:${m}`
   }
 
   if (!fid) return null
@@ -263,24 +274,18 @@ export default function Chat() {
                     </div>
                   )}
                   {msg.type === 'file' && (
-                    <div
-                      className={`px-4 py-3 rounded-2xl flex items-center gap-3 ${
+                    <button
+                      onClick={() => handleDownloadFile(msg.id)}
+                      className={`px-4 py-3 rounded-2xl flex items-center gap-3 hover:opacity-90 transition-opacity text-left w-full ${
                         isMine ? 'bg-blue-600 text-white' : 'bg-[#1E293B] text-gray-200'
                       }`}
                     >
                       <FileText className="w-8 h-8 flex-shrink-0" />
                       <div className="min-w-0">
                         <p className="text-sm truncate">{msg.content}</p>
-                        <a
-                          href={msg.fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={`text-xs underline ${isMine ? 'text-blue-200' : 'text-blue-400'}`}
-                        >
-                          下载文件
-                        </a>
+                        <p className={`text-xs ${isMine ? 'text-blue-200' : 'text-blue-400'}`}>点击下载</p>
                       </div>
-                    </div>
+                    </button>
                   )}
                   <p className={`text-xs text-gray-600 mt-1 ${isMine ? 'text-right' : 'text-left'}`}>
                     {formatTime(msg.timestamp)}
@@ -329,7 +334,7 @@ export default function Chat() {
             >
               <Paperclip className="w-5 h-5" />
             </button>
-            <input ref={fileInputRef} type="file" accept="*/*" onChange={handleFileUpload} className="hidden" />
+            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z,.txt,.csv,.ppt,.pptx,.mp3,.mp4,.avi,.mkv,.json,.xml" onChange={handleFileUpload} className="hidden" />
 
             <input
               type="text"

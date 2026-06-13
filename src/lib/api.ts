@@ -117,7 +117,7 @@ export const api = {
 
   // 验证码
   sendVerificationCode(target: string) {
-    return request<{ success: boolean; sent: boolean; message: string }>('/verification/send', {
+    return request<{ success: boolean; sent: boolean; message: string; code?: string }>('/verification/send', {
       method: 'POST',
       body: JSON.stringify({ target }),
     })

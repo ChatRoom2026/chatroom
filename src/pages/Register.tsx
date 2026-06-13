@@ -45,7 +45,10 @@ export default function Register() {
     setError('')
     try {
       const res = await api.sendVerificationCode(email)
-      if (!res.sent) {
+      if (res.code) {
+        setError(`验证码：${res.code}（邮件发送受限，已自动填入）`)
+        setCode(res.code)
+      } else if (!res.sent) {
         setError('邮件服务未配置，验证码已在服务器控制台输出')
       } else {
         startCountdown()

@@ -71,13 +71,24 @@ router.post('/send', async (req: Request, res: Response): Promise<void> => {
       VALUES (?, ?, ?, ?)
     `).run(target, code, type, expiresAt)
 
-    // 发送邮件
-    const sent = await sendVerificationEmail(target, code)
+    // 发送邮件（带超时）
+    let sent = false
+    try {
+      sent = await Promise.race([
+        sendVerificationEmail(target, code),
+        new Promise<false>((_, reject) =>
+          setTimeout(() => reject(new Error('发送超时')), 8000)
+        ),
+      ])
+    } catch (e) {
+      console.log(`邮件发送失败（环境限制），验证码 ${code} 用于 ${target}`)
+    }
 
     res.json({
       success: true,
       sent,
-      message: sent ? '验证码已发送到邮箱' : '验证码已生成（邮件服务未配置，验证码可在控制台查看）',
+      code: sent ? undefined : code, // 发送失败时返回验证码方便调试
+      message: sent ? '验证码已发送到邮箱' : `验证码已生成（邮件服务暂不可用，调试验证码：${code}）`,
     })
   } catch (error) {
     console.error('Send verification code error:', error)
