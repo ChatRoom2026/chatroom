@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
-import { api } from '@/lib/api'
-import { Settings as SettingsIcon, ArrowLeft, Camera, Trash2, User, Loader2 } from 'lucide-react'
+import { api, setApiBaseUrl, getApiBaseUrl } from '@/lib/api'
+import { isAndroid, isNativeApp, getPlatform } from '@/lib/platform'
+import { Settings as SettingsIcon, ArrowLeft, Camera, Trash2, User, Loader2, Server, Smartphone } from 'lucide-react'
 
 export default function Settings() {
   const user = useAuthStore((s) => s.user)
@@ -16,6 +17,9 @@ export default function Settings() {
   const [showAvatarModal, setShowAvatarModal] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [serverUrl, setServerUrl] = useState(getApiBaseUrl())
+  const [savingServer, setSavingServer] = useState(false)
+  const [platform, setPlatform] = useState('web')
 
   const updateUserInfo = useCallback(() => {
     const userStr = localStorage.getItem('user')
@@ -88,6 +92,26 @@ export default function Settings() {
     }
   }
 
+  useEffect(() => {
+    setPlatform(getPlatform())
+  }, [])
+
+  const handleSaveServer = async () => {
+    setSavingServer(true)
+    setError('')
+    setSuccess('')
+    try {
+      setApiBaseUrl(serverUrl.trim())
+      setSuccess('服务器地址已保存，重启 App 生效')
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSavingServer(false)
+    }
+  }
+
+  const showServerConfig = isNativeApp() && isAndroid()
+
   return (
     <div className="min-h-screen bg-[#0F172A] flex">
       {/* Sidebar */}
@@ -156,6 +180,43 @@ export default function Settings() {
             )}
             {success && (
               <div className="bg-green-500/10 border border-green-500/20 text-green-400 text-sm rounded-lg p-3">{success}</div>
+            )}
+
+            {/* Platform info (Android) */}
+            {showServerConfig && (
+              <div className="border-t border-gray-800 pt-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Smartphone className="w-4 h-4 text-green-400" />
+                  <h3 className="text-sm font-semibold text-green-400">Android 原生客户端</h3>
+                </div>
+                <p className="text-xs text-gray-500 mb-4">当前平台：{platform} · 应用版本 1.0</p>
+
+                <label className="text-sm text-gray-400 mb-2 block">
+                  <Server className="w-3.5 h-3.5 inline mr-1" />
+                  服务器地址
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={serverUrl}
+                    onChange={(e) => setServerUrl(e.target.value)}
+                    className="flex-1 px-4 py-2.5 bg-[#0F172A] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors text-sm"
+                    placeholder="http://192.168.1.100:3000/api"
+                  />
+                  <button
+                    onClick={handleSaveServer}
+                    disabled={savingServer}
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 text-white rounded-lg transition-colors whitespace-nowrap text-sm"
+                  >
+                    {savingServer ? '保存中' : '保存'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                  输入运行 ChatRoom 后端的服务器地址（包含 <code className="text-blue-400">/api</code> 后缀）。
+                  模拟器使用 <code className="text-blue-400">http://10.0.2.2:3001/api</code>，
+                  真机请使用电脑的局域网 IP，例如 <code className="text-blue-400">http://192.168.1.100:3001/api</code>。
+                </p>
+              </div>
             )}
 
             {/* Danger zone */}

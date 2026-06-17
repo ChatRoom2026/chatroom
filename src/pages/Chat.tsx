@@ -2,18 +2,29 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useChatStore } from '@/store/chatStore'
-import { api, type Message } from '@/lib/api'
+import { useUnreadStore } from '@/store/unreadStore'
+import { api, type Message, type GroupMessage, type GroupInfo } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
-import { ArrowLeft, Send, Paperclip, Image, FileText, Ban, X } from 'lucide-react'
+import { ArrowLeft, Send, Paperclip, Image, FileText, Ban, X, UserPlus, Users, Edit2, LogOut, Crown } from 'lucide-react'
 
 export default function Chat() {
-  const { friendId } = useParams<{ friendId: string }>()
+  const { friendId, groupId } = useParams<{ friendId: string; groupId: string }>()
   const navigate = useNavigate()
   const [friend, setFriend] = useState<{ id: number; username: string; avatar?: string; active?: number } | null>(null)
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [aiMessages, setAiMessages] = useState<Array<{ id: string; role: 'user' | 'ai'; content: string; timestamp: string }>>([])
+  const [groupInfo, setGroupInfo] = useState<GroupInfo | null>(null)
+  const [groupMembers, setGroupMembers] = useState<Array<{ id: number; username: string; avatar: string; role: string }>>([])
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false)
+  const [friends, setFriends] = useState<Array<{ id: number; username: string; avatar: string }>>([])
+  const [selectedFriends, setSelectedFriends] = useState<number[]>([])
+  const [showEditNameModal, setShowEditNameModal] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [showGroupMenu, setShowGroupMenu] = useState(false)
+  const [showMembersModal, setShowMembersModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -25,14 +36,76 @@ export default function Chat() {
   const addMessage = useChatStore((s) => s.addMessage)
   const typingUsers = useChatStore((s) => s.typingUsers)
   const setTypingUser = useChatStore((s) => s.setTypingUser)
+  const groupMessages = useChatStore((s) => s.groupMessages)
+  const loadGroupMessages = useChatStore((s) => s.loadGroupMessages)
+  const addGroupMessage = useChatStore((s) => s.addGroupMessage)
 
-  const fid = Number(friendId)
-  const friendMessages = messages[fid] || []
-  const isTyping = typingUsers[fid] || false
+  const isAiMode = friendId === 'ai'
+  const isGroupMode = !!groupId
+  const fid = isAiMode ? -999 : Number(friendId)
+  const currentGroupMessages = isGroupMode ? (groupMessages[Number(groupId)] || []) : []
+  const friendMessages = isAiMode ? aiMessages : (messages[fid] || [])
+  const isTyping = isAiMode ? false : (typingUsers[fid] || false)
 
-  // 加载好友信息和聊天记录
+  // 加载好友信息、群组信息和聊天记录
   useEffect(() => {
-    if (!fid) return
+    if (isGroupMode) {
+      setLoading(true)
+
+      // 加载群消息
+      loadGroupMessages(Number(groupId)).finally(() => setLoading(false))
+
+      // 加载群详情
+      api.getGroupDetail(Number(groupId)).then((res) => {
+        if (res.success && res.group) {
+          setGroupInfo({
+            id: res.group.id,
+            name: res.group.name,
+            avatar: res.group.avatar,
+            ownerId: res.group.ownerId,
+            memberCount: res.group.memberCount,
+          })
+        }
+      }).catch(() => {
+        // fallback
+        api.getGroups().then((res) => {
+          const g = res.groups.find((grp) => grp.id === Number(groupId))
+          if (g) setGroupInfo(g)
+        })
+      })
+
+      // 加载群成员
+      api.getGroupMembers(Number(groupId)).then((res) => {
+        setGroupMembers(res.members)
+      })
+
+      return
+    }
+
+    if (!fid && !isAiMode) return
+
+    // AI 模式
+    if (isAiMode) {
+      setFriend({
+        id: -999,
+        username: '屿岸 AI',
+        avatar: '',
+      })
+      setLoading(false)
+      return
+    }
+
+    // 文件传输助手（自己和自己聊天）
+    if (user && fid === user.id) {
+      setFriend({
+        id: user.id,
+        username: '文件传输助手',
+        avatar: user.avatar,
+      })
+      setLoading(true)
+      loadMessages(fid).finally(() => setLoading(false))
+      return
+    }
 
     // 加载好友信息
     api.getFriends().then((res) => {
@@ -43,7 +116,28 @@ export default function Chat() {
     // 加载聊天记录
     setLoading(true)
     loadMessages(fid).finally(() => setLoading(false))
-  }, [fid, loadMessages])
+  }, [fid, loadMessages, user, isAiMode, isGroupMode, groupId, loadGroupMessages])
+
+  // 通知后端当前正在查看的会话 + 清除未读
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket || !user) return
+
+    if (isGroupMode && groupId) {
+      const gid = Number(groupId)
+      socket.emit('active_session', { targetType: 'group', targetId: gid })
+      useUnreadStore.getState().clearUnread('group', gid)
+    } else if (fid && !isAiMode) {
+      socket.emit('active_session', { targetType: 'friend', targetId: fid })
+      useUnreadStore.getState().clearUnread('friend', fid)
+    } else {
+      socket.emit('active_session', null)
+    }
+
+    return () => {
+      socket.emit('active_session', null)
+    }
+  }, [fid, groupId, isGroupMode, isAiMode, user])
 
   // Socket 监听
   useEffect(() => {
@@ -54,33 +148,73 @@ export default function Chat() {
       addMessage(message)
     }
 
+    const handleNewGroupMessage = (message: GroupMessage) => {
+      addGroupMessage(message)
+    }
+
     const handleTypingStatus = (data: { userId: number; username: string; isTyping: boolean }) => {
       setTypingUser(data.userId, data.isTyping)
     }
 
     socket.on('new_message', handleNewMessage)
+    socket.on('new_group_message', handleNewGroupMessage)
     socket.on('typing_status', handleTypingStatus)
 
     return () => {
       socket.off('new_message', handleNewMessage)
+      socket.off('new_group_message', handleNewGroupMessage)
       socket.off('typing_status', handleTypingStatus)
     }
-  }, [addMessage, setTypingUser])
+  }, [addMessage, addGroupMessage, setTypingUser])
 
   // 自动滚动到最新消息
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [friendMessages])
+  }, [friendMessages, currentGroupMessages])
 
   const handleSend = useCallback(async () => {
-    if (!text.trim() || sending || !fid) return
-
-    const socket = getSocket()
-    if (!socket) return
+    if (!text.trim() || sending) return
 
     setSending(true)
     const content = text.trim()
     setText('')
+
+    if (isGroupMode) {
+      const socket = getSocket()
+      if (socket) {
+        socket.emit('send_group_message', {
+          groupId: Number(groupId),
+          content,
+          type: 'text',
+        })
+      }
+      setSending(false)
+      return
+    }
+
+    if (isAiMode) {
+      // AI 模式：调用 DeepSeek API
+      const userMsg = { id: `u_${Date.now()}`, role: 'user' as const, content, timestamp: new Date().toISOString() }
+      setAiMessages((prev) => [...prev, userMsg])
+
+      try {
+        const res = await api.sendAiMessage(content)
+        const aiMsg = { id: `ai_${Date.now()}`, role: 'ai' as const, content: res.reply, timestamp: new Date().toISOString() }
+        setAiMessages((prev) => [...prev, aiMsg])
+      } catch (err: any) {
+        const errMsg = { id: `err_${Date.now()}`, role: 'ai' as const, content: err.message || '请求失败，请稍后重试', timestamp: new Date().toISOString() }
+        setAiMessages((prev) => [...prev, errMsg])
+      }
+
+      setSending(false)
+      return
+    }
+
+    const socket = getSocket()
+    if (!socket) {
+      setSending(false)
+      return
+    }
 
     socket.emit('send_message', {
       receiverId: fid,
@@ -89,7 +223,7 @@ export default function Chat() {
     })
 
     setSending(false)
-  }, [text, sending, fid])
+  }, [text, sending, fid, isAiMode, isGroupMode, groupId])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -98,9 +232,11 @@ export default function Chat() {
     }
   }
 
-  // 发送正在输入状态
+  // 发送正在输入状态（普通聊天模式）
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setText(e.target.value)
+
+    if (isAiMode || isGroupMode) return // AI 模式和群聊模式不发送 typing 事件
 
     const socket = getSocket()
     if (!socket || !fid) return
@@ -119,7 +255,7 @@ export default function Chat() {
   // 发送图片
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || !fid) return
+    if (!file || (!fid && !isGroupMode)) return
 
     if (!file.type.startsWith('image/')) {
       alert('请选择图片文件')
@@ -131,12 +267,21 @@ export default function Chat() {
       const res = await api.uploadFile(file)
       const socket = getSocket()
       if (socket) {
-        socket.emit('send_message', {
-          receiverId: fid,
-          content: file.name,
-          type: 'image',
-          fileUrl: res.url,
-        })
+        if (isGroupMode) {
+          socket.emit('send_group_message', {
+            groupId: Number(groupId),
+            content: file.name,
+            type: 'image',
+            fileUrl: res.url,
+          })
+        } else {
+          socket.emit('send_message', {
+            receiverId: fid,
+            content: file.name,
+            type: 'image',
+            fileUrl: res.url,
+          })
+        }
       }
     } catch (err: any) {
       alert(err.message)
@@ -149,19 +294,28 @@ export default function Chat() {
   // 发送文档
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || !fid) return
+    if (!file || (!fid && !isGroupMode)) return
 
     setSending(true)
     try {
       const res = await api.uploadFile(file)
       const socket = getSocket()
       if (socket) {
-        socket.emit('send_message', {
-          receiverId: fid,
-          content: file.name,
-          type: 'file',
-          fileUrl: res.url,
-        })
+        if (isGroupMode) {
+          socket.emit('send_group_message', {
+            groupId: Number(groupId),
+            content: file.name,
+            type: 'file',
+            fileUrl: res.url,
+          })
+        } else {
+          socket.emit('send_message', {
+            receiverId: fid,
+            content: file.name,
+            type: 'file',
+            fileUrl: res.url,
+          })
+        }
       }
     } catch (err: any) {
       alert(err.message)
@@ -194,20 +348,24 @@ export default function Chat() {
     return `${month}-${day} ${h}:${m}`
   }
 
-  if (!fid) return null
+  if (!fid && !isGroupMode) return null
 
   return (
-    <div className="min-h-screen bg-[#0F172A] flex flex-col">
+    <div className="h-screen bg-[#0F172A] flex flex-col overflow-hidden">
       {/* Header */}
       <header className="bg-[#1E293B] border-b border-gray-800 px-4 py-3 flex items-center gap-3">
         <button
-          onClick={() => navigate('/friends')}
+          onClick={() => navigate(isGroupMode ? '/friends' : '/friends')}
           className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="relative">
-          {friend?.avatar ? (
+          {isGroupMode ? (
+            <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-semibold">
+              {groupInfo?.name?.[0]?.toUpperCase() || 'G'}
+            </div>
+          ) : friend?.avatar ? (
             <img src={friend.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
           ) : (
             <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-semibold">
@@ -215,20 +373,66 @@ export default function Chat() {
             </div>
           )}
         </div>
-        <div>
-          <h2 className="text-white font-semibold">{friend?.username || '加载中...'}</h2>
-          {friend?.active === 0 ? (
-            <p className="text-xs text-red-400/80">已注销 · 不可聊天</p>
+        <div className="flex-1">
+          {isGroupMode ? (
+            <>
+              <h2 className="text-white font-semibold">{groupInfo?.name || '群聊'}</h2>
+              <p className="text-xs text-gray-400">{groupMembers.length} 位成员</p>
+            </>
           ) : (
-            <p className="text-xs text-gray-400">
-              {isTyping ? '正在输入...' : useChatStore.getState().onlineUsers.includes(fid) ? '在线' : '离线'}
-            </p>
+            <>
+              <h2 className="text-white font-semibold">{friend?.username || '加载中...'}</h2>
+              {friend?.active === 0 ? (
+                <p className="text-xs text-red-400/80">已注销 · 不可聊天</p>
+              ) : (
+                <p className="text-xs text-gray-400">
+                  {isTyping ? '正在输入...' : useChatStore.getState().onlineUsers.includes(fid) ? '在线' : '离线'}
+                </p>
+              )}
+            </>
           )}
         </div>
+        {isGroupMode && (
+          <div className="flex items-center gap-1">
+            {groupInfo?.ownerId === user?.id && (
+              <button
+                onClick={() => {
+                  setNewGroupName(groupInfo?.name || '')
+                  setShowEditNameModal(true)
+                }}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                title="修改群名称"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={() => {
+                api.getFriends().then((res) => {
+                  setFriends(res.friends.filter((f) => !groupMembers.some((m) => m.id === f.id)))
+                  setShowAddMemberModal(true)
+                })
+              }}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="添加成员"
+            >
+              <UserPlus className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setShowGroupMenu(true)}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="更多"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+              </svg>
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
         {loading ? (
           <div className="space-y-4 pt-4">
             {[1, 2, 3].map((i) => (
@@ -237,21 +441,102 @@ export default function Chat() {
               </div>
             ))}
           </div>
+        ) : isGroupMode ? (
+          currentGroupMessages.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-gray-500 text-sm">暂无群消息</p>
+            </div>
+          ) : (
+            currentGroupMessages.map((msg) => {
+              const isMine = msg.senderId === user?.id
+              return (
+                <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[75%] ${isMine ? 'order-1' : 'order-1'}`}>
+                    {!isMine && <p className="text-xs text-gray-500 mb-1 ml-1">{msg.senderName}</p>}
+                    {msg.type === 'text' && (
+                      <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                        isMine
+                          ? 'bg-blue-600 text-white rounded-br-md'
+                          : 'bg-[#1E293B] text-gray-200 rounded-bl-md'
+                      }`}>
+                        {msg.content}
+                      </div>
+                    )}
+                    {msg.type === 'image' && (
+                      <div>
+                        <button onClick={() => setPreviewImage(msg.fileUrl)} className="block w-full text-left">
+                          <img
+                            src={msg.fileUrl}
+                            alt={msg.content}
+                            className="max-w-60 rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
+                            loading="lazy"
+                          />
+                        </button>
+                        <p className={`text-xs mt-1 ${isMine ? 'text-right' : 'text-left'}`}>{msg.content}</p>
+                      </div>
+                    )}
+                    {msg.type === 'file' && (
+                      <button
+                        onClick={() => handleDownloadFile(msg.id)}
+                        className={`px-4 py-3 rounded-2xl flex items-center gap-3 hover:opacity-90 transition-opacity ${
+                          isMine ? 'flex-row-reverse rounded-br-md' : 'rounded-bl-md'
+                        } bg-[#1E293B] text-gray-200`}
+                      >
+                        <FileText className="w-8 h-8 flex-shrink-0" />
+                        <div className={`min-w-0 ${isMine ? 'text-right' : 'text-left'}`}>
+                          <p className="text-sm truncate">{msg.content}</p>
+                          <p className="text-xs text-blue-400">点击下载</p>
+                        </div>
+                      </button>
+                    )}
+                    <p className={`text-xs text-gray-600 mt-1 ${isMine ? 'text-right' : 'text-left'}`}>{formatTime(msg.timestamp)}</p>
+                  </div>
+                </div>
+              )
+            })
+          )
+        ) : isAiMode ? (
+          <div className="space-y-4">
+            {friendMessages.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-gray-500 text-sm">开始和屿岸 AI 对话吧</p>
+              </div>
+            ) : (
+              (friendMessages as Array<{ id: string; role: string; content: string; timestamp: string }>).map((msg) => (
+                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[75%] ${msg.role === 'user' ? 'order-1' : 'order-1'}`}>
+                    <div
+                      className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                        msg.role === 'user'
+                          ? 'bg-blue-600 text-white rounded-br-md'
+                          : 'bg-[#1E293B] text-gray-200 rounded-bl-md'
+                      }`}
+                    >
+                      {msg.content}
+                    </div>
+                    <p className={`text-xs text-gray-600 mt-1 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                      {formatTime(msg.timestamp)}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         ) : friendMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-gray-500 text-sm">开始聊天吧</p>
           </div>
         ) : (
-          friendMessages.map((msg) => {
+          (friendMessages as Message[]).map((msg) => {
             const isMine = msg.senderId === user?.id
             return (
               <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[75%] ${isMine ? 'order-1' : 'order-1'}`}>
+                <div className={`max-w-[75%] min-w-0 overflow-hidden ${isMine ? 'order-1' : 'order-1'}`}>
                   {msg.type === 'text' && (
                     <div
-                      className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                      className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed break-words overflow-wrap-anywhere ${
                         isMine
-                          ? 'bg-blue-600 text-white rounded-br-md'
+                          ? `bg-blue-600 text-white rounded-br-md ${user?.vip === 1 ? 'border border-yellow-400/50 shadow-sm shadow-yellow-400/20' : ''}`
                           : 'bg-[#1E293B] text-gray-200 rounded-bl-md'
                       }`}
                     >
@@ -259,16 +544,16 @@ export default function Chat() {
                     </div>
                   )}
                   {msg.type === 'image' && (
-                    <div className="space-y-1">
-                      <button onClick={() => setPreviewImage(msg.fileUrl)} className="block w-full text-left">
+                    <div className={`space-y-1 max-w-full overflow-hidden ${isMine && user?.vip === 1 ? 'border border-yellow-400/50 rounded-2xl p-1' : ''}`}>
+                      <button onClick={() => setPreviewImage(msg.fileUrl)} className="block text-left max-w-full">
                         <img
                           src={msg.fileUrl}
                           alt={msg.content}
-                          className="max-w-60 rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
+                          className="max-w-60 max-h-60 object-contain rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
                           loading="lazy"
                         />
                       </button>
-                      <p className={`text-xs text-gray-400 ${isMine ? 'text-right' : 'text-left'}`}>
+                      <p className={`text-xs text-gray-400 break-all ${isMine ? 'text-right' : 'text-left'}`}>
                         {msg.content}
                       </p>
                     </div>
@@ -276,12 +561,14 @@ export default function Chat() {
                   {msg.type === 'file' && (
                     <button
                       onClick={() => handleDownloadFile(msg.id)}
-                      className={`px-4 py-3 rounded-2xl flex items-center gap-3 hover:opacity-90 transition-opacity text-left w-full ${
-                        isMine ? 'bg-blue-600 text-white' : 'bg-[#1E293B] text-gray-200'
+                      className={`px-4 py-3 rounded-2xl flex items-center gap-3 hover:opacity-90 transition-opacity text-left w-full max-w-full overflow-hidden ${
+                        isMine
+                          ? `bg-blue-600 text-white ${user?.vip === 1 ? 'border border-yellow-400/50' : ''}`
+                          : 'bg-[#1E293B] text-gray-200'
                       }`}
                     >
                       <FileText className="w-8 h-8 flex-shrink-0" />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="text-sm truncate">{msg.content}</p>
                         <p className={`text-xs ${isMine ? 'text-blue-200' : 'text-blue-400'}`}>点击下载</p>
                       </div>
@@ -311,30 +598,34 @@ export default function Chat() {
 
       {/* Input */}
       <div className="bg-[#1E293B] border-t border-gray-800 px-4 py-3">
-        {friend?.active === 0 ? (
+        {friend?.active === 0 && !isAiMode && !isGroupMode ? (
           <div className="flex items-center gap-2 justify-center py-2">
             <Ban className="w-4 h-4 text-red-400/60" />
             <p className="text-sm text-red-400/60">该用户已注销，无法发送消息</p>
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => imageInputRef.current?.click()}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-              title="发送图片"
-            >
-              <Image className="w-5 h-5" />
-            </button>
-            <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+            {!isAiMode && (
+              <>
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  title="发送图片"
+                >
+                  <Image className="w-5 h-5" />
+                </button>
+                <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
 
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-              title="发送文件"
-            >
-              <Paperclip className="w-5 h-5" />
-            </button>
-            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z,.txt,.csv,.ppt,.pptx,.mp3,.mp4,.avi,.mkv,.json,.xml" onChange={handleFileUpload} className="hidden" />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  title="发送文件"
+                >
+                  <Paperclip className="w-5 h-5" />
+                </button>
+                <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z,.txt,.csv,.ppt,.pptx,.mp3,.mp4,.avi,.mkv,.json,.xml" onChange={handleFileUpload} className="hidden" />
+              </>
+            )}
 
             <input
               type="text"
@@ -342,7 +633,7 @@ export default function Chat() {
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               className="flex-1 px-4 py-2.5 bg-[#0F172A] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="输入消息..."
+              placeholder={isAiMode ? '向屿岸 AI 提问...' : isGroupMode ? '发送群消息...' : '输入消息...'}
               disabled={sending}
             />
 
@@ -375,6 +666,289 @@ export default function Chat() {
             className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* 添加成员模态框 */}
+      {showAddMemberModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-[#1E293B] rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <h3 className="text-white font-semibold text-lg">添加群成员</h3>
+              <button
+                onClick={() => {
+                  setShowAddMemberModal(false)
+                  setSelectedFriends([])
+                }}
+                className="p-1 text-gray-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {friends.length === 0 ? (
+                <div className="text-center py-8">
+                  <Users className="w-12 h-12 text-gray-600 mx-auto mb-2" />
+                  <p className="text-gray-400 text-sm">没有可添加的好友</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {friends.map((friend) => (
+                    <label
+                      key={friend.id}
+                      className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
+                        selectedFriends.includes(friend.id)
+                          ? 'bg-blue-600/20 border border-blue-500/30'
+                          : 'hover:bg-gray-700/50 border border-transparent'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedFriends.includes(friend.id)}
+                        onChange={() => {
+                          setSelectedFriends((prev) =>
+                            prev.includes(friend.id)
+                              ? prev.filter((id) => id !== friend.id)
+                              : [...prev, friend.id]
+                          )
+                        }}
+                        className="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700"
+                      />
+                      <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-semibold">
+                        {friend.avatar ? (
+                          <img src={friend.avatar} alt="" className="w-full h-full rounded-full object-cover" />
+                        ) : (
+                          friend.username[0]?.toUpperCase() || '?'
+                        )}
+                      </div>
+                      <span className="text-white text-sm">{friend.username}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-700">
+              <button
+                onClick={async () => {
+                  if (selectedFriends.length === 0) return
+                  try {
+                    await api.addGroupMembers(Number(groupId), selectedFriends)
+                    setShowAddMemberModal(false)
+                    setSelectedFriends([])
+                    // 刷新群成员列表
+                    const res = await api.getGroupMembers(Number(groupId))
+                    setGroupMembers(res.members)
+                  } catch (err) {
+                    console.error('添加成员失败:', err)
+                  }
+                }}
+                disabled={selectedFriends.length === 0}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-colors font-medium"
+              >
+                添加 {selectedFriends.length > 0 ? `(${selectedFriends.length})` : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 修改群名称模态框 */}
+      {showEditNameModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-[#1E293B] rounded-2xl w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold text-lg">修改群名称</h3>
+              <button
+                onClick={() => setShowEditNameModal(false)}
+                className="p-1 text-gray-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              className="w-full px-4 py-2.5 bg-[#0F172A] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors mb-4"
+              placeholder="输入新的群名称"
+              maxLength={30}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowEditNameModal(false)}
+                className="flex-1 py-2.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={async () => {
+                  if (!newGroupName.trim()) return
+                  try {
+                    await api.updateGroupName(Number(groupId), newGroupName.trim())
+                    setGroupInfo(groupInfo ? { ...groupInfo, name: newGroupName.trim() } : null)
+                    setShowEditNameModal(false)
+                  } catch (err) {
+                    console.error('修改群名称失败:', err)
+                  }
+                }}
+                disabled={!newGroupName.trim()}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 群管理菜单 */}
+      {showGroupMenu && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setShowGroupMenu(false)}>
+          <div
+            className="bg-[#1E293B] rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-white font-semibold text-center mb-3">群聊管理</h3>
+            <button
+              onClick={async () => {
+                setShowGroupMenu(false)
+                const res = await api.getGroupMembers(Number(groupId))
+                setGroupMembers(res.members)
+                setShowMembersModal(true)
+              }}
+              className="w-full p-3 bg-[#0F172A] hover:bg-gray-700 rounded-xl text-white text-left flex items-center gap-3"
+            >
+              <Users className="w-5 h-5 text-blue-400" />
+              <div>
+                <p className="text-sm font-medium">查看群成员</p>
+                <p className="text-xs text-gray-500">共 {groupMembers.length} 位成员</p>
+              </div>
+            </button>
+            <button
+              onClick={async () => {
+                if (!confirm('确定要退出该群聊吗？\n\n' + (groupInfo?.ownerId === user?.id ? '你是群主，退出后群主将自动转让给最早加入的成员。' : ''))) {
+                  return
+                }
+                try {
+                  await api.leaveGroup(Number(groupId))
+                  alert('已退出群聊')
+                  navigate('/friends')
+                } catch (err) {
+                  console.error('退出群聊失败:', err)
+                  alert('退出失败')
+                }
+              }}
+              className="w-full p-3 bg-[#0F172A] hover:bg-gray-700 rounded-xl text-white text-left flex items-center gap-3"
+            >
+              <LogOut className="w-5 h-5 text-orange-400" />
+              <div>
+                <p className="text-sm font-medium">退出群聊</p>
+                <p className="text-xs text-gray-500">{groupInfo?.ownerId === user?.id ? '退出后自动转让群主' : '不再接收群消息'}</p>
+              </div>
+            </button>
+            {groupInfo?.ownerId === user?.id && (
+              <button
+                onClick={async () => {
+                  if (!confirm('确定要解散该群聊吗？\n\n此操作将删除所有群消息，无法恢复！')) {
+                    return
+                  }
+                  try {
+                    await api.deleteGroup(Number(groupId))
+                    alert('已解散群聊')
+                    navigate('/friends')
+                  } catch (err) {
+                    console.error('解散群聊失败:', err)
+                    alert('解散失败')
+                  }
+                }}
+                className="w-full p-3 bg-[#0F172A] hover:bg-red-900/30 rounded-xl text-red-400 text-left flex items-center gap-3"
+              >
+                <Ban className="w-5 h-5" />
+                <div>
+                  <p className="text-sm font-medium">解散群聊</p>
+                  <p className="text-xs text-red-400/60">仅群主可操作，删除所有消息</p>
+                </div>
+              </button>
+            )}
+            <button
+              onClick={() => setShowGroupMenu(false)}
+              className="w-full p-3 bg-gray-700 hover:bg-gray-600 rounded-xl text-white text-sm"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 群成员列表模态框 */}
+      {showMembersModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowMembersModal(false)}>
+          <div
+            className="bg-[#1E293B] rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <h3 className="text-white font-semibold text-lg">群成员 ({groupMembers.length})</h3>
+              <button
+                onClick={() => setShowMembersModal(false)}
+                className="p-1 text-gray-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {groupMembers.map((member) => {
+                const isOwner = member.id === groupInfo?.ownerId
+                const isAdmin = member.role === 'admin' || member.role === 'owner'
+                const isMe = member.id === user?.id
+                return (
+                  <div
+                    key={member.id}
+                    className="flex items-center gap-3 p-3 hover:bg-gray-700/50 rounded-xl"
+                  >
+                    <div className="relative">
+                      {member.avatar ? (
+                        <img src={member.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-semibold">
+                          {member.username[0]?.toUpperCase() || '?'}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white text-sm font-medium truncate">{member.username}</span>
+                        {isMe && <span className="text-xs text-blue-400">(我)</span>}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {isOwner ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-yellow-400">
+                            <Crown className="w-3 h-3" />群主
+                          </span>
+                        ) : isAdmin ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-blue-400">
+                            <Crown className="w-3 h-3" />管理员
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    {!isOwner && isOwner === false && groupInfo?.ownerId === user?.id && (
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`确定将群主转让给 ${member.username} 吗？`)) return
+                          // 转让群主功能：这里简化为先让对方成为 owner，需要后端支持
+                          alert('转让群主功能待后端支持')
+                        }}
+                        className="text-xs text-gray-400 hover:text-white"
+                      >
+                        转让
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>

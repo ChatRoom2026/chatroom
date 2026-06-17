@@ -1,0 +1,22 @@
+{
+  "appId": "com.chatroom.app",
+  "appName": "ChatRoom",
+  "webDir": "dist",
+  "server": {
+    "url": "",
+    "cleartext": true,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#0F172A",
+      "showSpinner": false
+    }
+  }
+}

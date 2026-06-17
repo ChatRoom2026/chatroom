@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useChatStore } from '@/store/chatStore'
-import { api } from '@/lib/api'
+import { useUnreadStore } from '@/store/unreadStore'
+import { api, type GroupInfo } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
-import { MessageCircle, LogOut, UserPlus, Search, Users, Camera, Trash2, X, Settings as SettingsIcon } from 'lucide-react'
+import { MessageCircle, LogOut, UserPlus, Search, Users, Camera, Trash2, X, Settings as SettingsIcon, Newspaper, Crown, Bell, Check, Bot, Plus } from 'lucide-react'
 
 interface Friend {
   id: number
@@ -23,13 +24,22 @@ export default function Friends() {
   const [loading, setLoading] = useState(true)
   const [showAvatarModal, setShowAvatarModal] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Friend | null>(null)
+  const [friendRequests, setFriendRequests] = useState<Array<{ id: number; senderId: number; senderUsername: string; senderAvatar: string }>>([])
+  const [showRequests, setShowRequests] = useState(false)
   const longPressTimer = useRef<number | null>(null)
   const longPressTriggered = useRef(false)
+  const [groups, setGroups] = useState<GroupInfo[]>([])
+  const [showCreateGroup, setShowCreateGroup] = useState(false)
+  const [groupName, setGroupName] = useState('')
+  const [selectedMembers, setSelectedMembers] = useState<number[]>([])
+  const [creatingGroup, setCreatingGroup] = useState(false)
 
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
   const onlineUsers = useChatStore((s) => s.onlineUsers)
   const clearMessages = useChatStore((s) => s.clearMessages)
+  const unread = useUnreadStore((s) => s.unread)
+  const loadUnread = useUnreadStore((s) => s.loadUnread)
   const navigate = useNavigate()
 
   const updateUserInfo = useCallback(() => {
@@ -53,16 +63,68 @@ export default function Friends() {
     }
   }, [])
 
+  const loadFriendRequests = useCallback(async () => {
+    try {
+      const res = await api.getFriendRequests()
+      setFriendRequests(res.requests)
+    } catch (err: any) {
+      console.error('加载好友请求失败:', err)
+    }
+  }, [])
+
+  const loadGroups = useCallback(async () => {
+    try {
+      const res = await api.getGroups()
+      setGroups(res.groups)
+    } catch (err: any) {
+      console.error('加载群聊列表失败:', err)
+    }
+  }, [])
+
+  const checkVipStatus = useCallback(async () => {
+    try {
+      const res = await api.getVipStatus()
+      // 更新 VIP 状态到 localStorage
+      const userInfo = updateUserInfo()
+      if (userInfo) {
+        userInfo.vip = res.vip
+        localStorage.setItem('user', JSON.stringify(userInfo))
+      }
+      // 同步更新 Zustand store 触发重渲染
+      const currentStoreUser = useAuthStore.getState().user
+      if (currentStoreUser) {
+        useAuthStore.setState({ user: { ...currentStoreUser, vip: res.vip } })
+      }
+    } catch {}
+  }, [updateUserInfo])
+
   useEffect(() => {
     loadFriends()
-  }, [loadFriends])
+    loadFriendRequests()
+    loadGroups()
+    checkVipStatus()
+    loadUnread()
+  }, [loadFriends, loadFriendRequests, loadGroups, checkVipStatus, loadUnread])
 
   useEffect(() => {
     const socket = getSocket()
     if (!socket) return
     socket.on('friend_added', () => loadFriends())
-    return () => { socket.off('friend_added') }
-  }, [loadFriends])
+    socket.on('friend_request', () => { loadFriendRequests() })
+    socket.on('friend_request_responded', () => {
+      loadFriends()
+      loadFriendRequests()
+    })
+    socket.on('group_created', () => loadGroups())
+    socket.on('unread_updated', () => loadUnread())
+    return () => {
+      socket.off('friend_added')
+      socket.off('friend_request')
+      socket.off('friend_request_responded')
+      socket.off('group_created')
+      socket.off('unread_updated')
+    }
+  }, [loadFriends, loadFriendRequests, loadGroups, loadUnread])
 
   const handleSearch = async (q: string) => {
     setSearchQuery(q)
@@ -77,10 +139,14 @@ export default function Friends() {
     if (!addUsername.trim()) return
     setError('')
     try {
-      await api.addFriend(addUsername)
+      const res = await api.sendFriendRequest(addUsername)
       setShowAdd(false)
       setAddUsername('')
-      loadFriends()
+      if (res.friend) {
+        loadFriends()
+      } else {
+        alert(res.message || '好友请求已发送')
+      }
     } catch (err: any) { setError(err.message) }
   }
 
@@ -195,10 +261,20 @@ export default function Friends() {
                 <div className="absolute inset-0 rounded-full bg-black/0 group-hover:bg-black/40 flex items-center justify-center transition-colors">
                   <Camera className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
+                {user?.vip === 1 && (
+                  <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center border-2 border-[#1E293B]">
+                    <Crown className="w-2.5 h-2.5 text-white" />
+                  </div>
+                )}
               </div>
               <div>
-                <h2 className="text-white font-semibold">{user?.username}</h2>
-                <p className="text-xs text-gray-400">在线</p>
+                <div className="flex items-center gap-1.5">
+                  <h2 className="text-white font-semibold">{user?.username}</h2>
+                  {user?.vip === 1 && (
+                    <Crown className="w-4 h-4 text-yellow-400" />
+                  )}
+                </div>
+                <p className="text-xs text-gray-400">{user?.vip === 1 ? 'VIP 会员' : '在线'}</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -218,6 +294,20 @@ export default function Friends() {
               </button>
             </div>
           </div>
+
+          {/* 文件传输助手 */}
+          <button
+            onClick={() => navigate(`/chat/${user?.id}`)}
+            className="flex items-center gap-3 w-full p-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 transition-colors text-left mb-3"
+          >
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0">
+              <MessageCircle className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-sm font-medium">文件传输助手</p>
+              <p className="text-xs text-blue-400">给自己发消息和文件</p>
+            </div>
+          </button>
 
           {/* Search */}
           <div className="relative">
@@ -258,14 +348,75 @@ export default function Friends() {
                 <Users className="w-4 h-4" />
                 <span>好友列表 ({friends.length})</span>
               </div>
-              <button
-                onClick={() => setShowAdd(true)}
-                className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-                title="添加好友"
-              >
-                <UserPlus className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                {friendRequests.length > 0 && (
+                  <button
+                    onClick={() => setShowRequests(!showRequests)}
+                    className="relative p-1.5 text-yellow-400 hover:text-yellow-300 hover:bg-gray-700 rounded-lg transition-colors"
+                    title="好友请求"
+                  >
+                    <Bell className="w-4 h-4" />
+                    <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-white text-[10px] flex items-center justify-center font-bold">
+                      {friendRequests.length > 9 ? '9+' : friendRequests.length}
+                    </span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAdd(true)}
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  title="添加好友"
+                >
+                  <UserPlus className="w-4 h-4" />
+                </button>
+              </div>
             </div>
+
+            {/* 好友请求列表 */}
+            {showRequests && friendRequests.length > 0 && (
+              <div className="mb-3 bg-[#0F172A] rounded-xl border border-yellow-500/20 overflow-hidden">
+                <div className="px-3 py-2 text-xs text-yellow-400 font-medium border-b border-yellow-500/10">
+                  好友请求 ({friendRequests.length})
+                </div>
+                {friendRequests.map((req) => (
+                  <div key={req.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-800 last:border-b-0">
+                    <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                      {req.senderUsername[0]?.toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm truncate">{req.senderUsername}</p>
+                      <p className="text-xs text-gray-500">请求添加你为好友</p>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.respondFriendRequest(req.id, 'accept')
+                            loadFriendRequests()
+                            loadFriends()
+                          } catch {}
+                        }}
+                        className="p-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                        title="同意"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.respondFriendRequest(req.id, 'reject')
+                            loadFriendRequests()
+                          } catch {}
+                        }}
+                        className="p-1.5 bg-red-600/50 hover:bg-red-600 text-red-200 hover:text-white rounded-lg transition-colors"
+                        title="拒绝"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {loading ? (
               <div className="space-y-3">
@@ -314,6 +465,11 @@ export default function Friends() {
                       {friend.active === 1 && onlineUsers.includes(friend.id) && (
                         <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-[#1E293B]" />
                       )}
+                      {unread[`friend:${friend.id}`] && (
+                        <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-[#1E293B]">
+                          {unread[`friend:${friend.id}`].count > 99 ? '99+' : unread[`friend:${friend.id}`].count}
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 text-left">
                       {friend.active === 1 ? (
@@ -338,6 +494,106 @@ export default function Friends() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Groups */}
+        <div className="border-t border-gray-800 px-4 py-3">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2 text-gray-400 text-sm">
+              <Users className="w-4 h-4" />
+              <span>群聊 ({groups.length})</span>
+            </div>
+            <button
+              onClick={() => setShowCreateGroup(true)}
+              className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="创建群聊"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+          {groups.length === 0 ? (
+            <p className="text-gray-500 text-xs text-center py-2">暂无群聊</p>
+          ) : (
+            <div className="space-y-1">
+              {groups.map((group) => {
+                const groupUnread = unread[`group:${group.id}`]
+                return (
+                  <div
+                    key={group.id}
+                    onClick={() => navigate(`/group/${group.id}`)}
+                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-700/50 transition-colors cursor-pointer"
+                  >
+                    <div className="relative flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-600 flex items-center justify-center">
+                        <Users className="w-5 h-5 text-white" />
+                      </div>
+                      {groupUnread && (
+                        <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-[#1E293B]">
+                          {groupUnread.count > 99 ? '99+' : groupUnread.count}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-white text-sm font-medium truncate">{group.name}</p>
+                        <span className="text-xs text-gray-500 ml-2 whitespace-nowrap">{group.memberCount} 人</span>
+                      </div>
+                      <p className={`text-xs truncate ${groupUnread ? 'text-white font-medium' : 'text-gray-500'}`}>
+                        {groupUnread?.lastMessage || group.lastMessage || '暂无消息'}
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Features */}
+        <div className="border-t border-gray-800 px-4 py-3">
+          <div className="flex items-center gap-2 text-gray-400 text-sm mb-2">
+            <span>功能</span>
+          </div>
+          <button
+            onClick={() => navigate('/chat/ai')}
+            className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-gray-700/50 transition-colors text-left mb-1"
+          >
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+              <Bot className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-white text-sm font-medium">屿岸 AI</p>
+              <p className="text-xs text-gray-500">智能对话助手</p>
+            </div>
+          </button>
+          <button
+            onClick={() => navigate('/moments')}
+            className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-gray-700/50 transition-colors text-left"
+          >
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+              <Newspaper className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-white text-sm font-medium">发动态</p>
+              <p className="text-xs text-gray-500">分享生活瞬间</p>
+            </div>
+          </button>
+        </div>
+
+        {/* VIP Entry - Bottom */}
+        <div className="border-t border-gray-800 px-4 py-3">
+          <button
+            onClick={() => navigate('/vip')}
+            className="flex items-center gap-3 w-full p-3 rounded-xl bg-gradient-to-r from-yellow-500/10 to-yellow-600/5 hover:from-yellow-500/20 hover:to-yellow-600/10 border border-yellow-500/20 transition-colors text-left"
+          >
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center">
+              <Crown className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-yellow-400 text-sm font-medium">{user?.vip === 1 ? '续费VIP' : '开通VIP'}</p>
+              <p className="text-xs text-yellow-500/60">{user?.vip === 1 ? '延长会员期限' : '解锁全部功能'}</p>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -434,6 +690,91 @@ export default function Friends() {
             </label>
 
             <p className="text-xs text-gray-500 text-center mt-3">支持 JPG、PNG，最大 5MB</p>
+          </div>
+        </div>
+      )}
+
+      {/* Create group modal */}
+      {showCreateGroup && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#1E293B] rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">创建群聊</h3>
+              <button onClick={() => { setShowCreateGroup(false); setGroupName(''); setSelectedMembers([]); setError('') }}
+                className="p-1 text-gray-400 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg p-3 mb-4">{error}</div>
+            )}
+
+            <input
+              type="text"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              className="w-full px-4 py-2.5 bg-[#0F172A] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors mb-4"
+              placeholder="输入群聊名称"
+            />
+
+            <div className="text-sm text-gray-400 mb-2">选择好友加入群聊</div>
+            <div className="flex-1 overflow-y-auto mb-4 space-y-1 max-h-60">
+              {friends.length === 0 ? (
+                <p className="text-gray-500 text-xs text-center py-4">暂无好友可添加</p>
+              ) : (
+                friends.map((friend) => (
+                  <label
+                    key={friend.id}
+                    className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-colors ${
+                      selectedMembers.includes(friend.id)
+                        ? 'bg-blue-600/20 border border-blue-500/30'
+                        : 'hover:bg-gray-700/50 border border-transparent'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedMembers.includes(friend.id)}
+                      onChange={() => {
+                        setSelectedMembers((prev) =>
+                          prev.includes(friend.id)
+                            ? prev.filter((id) => id !== friend.id)
+                            : [...prev, friend.id]
+                        )
+                      }}
+                      className="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700"
+                    />
+                    <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                      {friend.username[0]?.toUpperCase()}
+                    </div>
+                    <span className="text-white text-sm">{friend.username}</span>
+                  </label>
+                ))
+              )}
+            </div>
+
+            <button
+              onClick={async () => {
+                if (!groupName.trim()) return
+                setCreatingGroup(true)
+                setError('')
+                try {
+                  await api.createGroup(groupName.trim(), selectedMembers)
+                  setShowCreateGroup(false)
+                  setGroupName('')
+                  setSelectedMembers([])
+                  loadGroups()
+                } catch (err: any) {
+                  setError(err.message)
+                } finally {
+                  setCreatingGroup(false)
+                }
+              }}
+              disabled={creatingGroup || !groupName.trim()}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+            >
+              {creatingGroup ? '创建中...' : '创建群聊'}
+            </button>
           </div>
         </div>
       )}

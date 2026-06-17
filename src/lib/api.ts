@@ -1,8 +1,33 @@
 /**
  * API 请求工具
+ * 支持浏览器和 Capacitor Android 客户端
  */
 
-const API_BASE = '/api'
+import { isAndroid, isNativeApp } from './platform'
+
+// Android 原生客户端：连接到本地运行的 Express 服务器（adb reverse 或局域网 IP）
+// 浏览器开发：使用 vite proxy 转发 /api
+function detectApiBase(): string {
+  if (isNativeApp() && isAndroid()) {
+    // 优先从 localStorage 读取用户配置的服务器地址
+    const stored = localStorage.getItem('api_base_url')
+    if (stored) return stored
+    // 默认指向本机（需要 adb reverse tcp:3001 tcp:3001）
+    return 'http://10.0.2.2:3001/api'
+  }
+  return '/api'
+}
+
+let API_BASE = detectApiBase()
+
+export function setApiBaseUrl(url: string) {
+  API_BASE = url || '/api'
+  localStorage.setItem('api_base_url', API_BASE)
+}
+
+export function getApiBaseUrl(): string {
+  return API_BASE
+}
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('token')
@@ -51,7 +76,7 @@ export const api = {
   },
 
   login(loginId: string, password: string) {
-    return request<{ success: boolean; user: { id: number; username: string; avatar?: string }; token: string }>('/auth/login', {
+    return request<{ success: boolean; user: { id: number; username: string; avatar?: string; vip?: number }; token: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ loginId, password }),
     })
@@ -87,10 +112,24 @@ export const api = {
     return request<{ success: boolean; users: Array<{ id: number; username: string }> }>(`/friends/search?q=${encodeURIComponent(q)}`)
   },
 
-  addFriend(username: string) {
-    return request<{ success: boolean; friend: { id: number; username: string } }>('/friends/add', {
+  // 发送好友请求
+  sendFriendRequest(username: string) {
+    return request<{ success: boolean; message: string; friend?: { id: number; username: string } }>('/friends/request', {
       method: 'POST',
       body: JSON.stringify({ username }),
+    })
+  },
+
+  // 获取待处理的好友请求
+  getFriendRequests() {
+    return request<{ success: boolean; requests: Array<{ id: number; senderId: number; senderUsername: string; senderAvatar: string; status: string; createdAt: string }> }>('/friends/requests')
+  },
+
+  // 处理好友请求（同意/拒绝）
+  respondFriendRequest(requestId: number, action: 'accept' | 'reject') {
+    return request<{ success: boolean; message: string }>('/friends/respond', {
+      method: 'POST',
+      body: JSON.stringify({ requestId, action }),
     })
   },
 
@@ -129,6 +168,141 @@ export const api = {
       body: JSON.stringify({ target, code }),
     })
   },
+
+  // 动态
+  getPosts() {
+    return request<{ success: boolean; posts: Array<Post> }>('/posts')
+  },
+
+  createPost(content: string, imageUrl?: string) {
+    return request<{ success: boolean; post: Post }>('/posts', {
+      method: 'POST',
+      body: JSON.stringify({ content, imageUrl: imageUrl || '' }),
+    })
+  },
+
+  getComments(postId: number) {
+    return request<{ success: boolean; comments: Array<Comment> }>(`/posts/${postId}/comments`)
+  },
+
+  createComment(postId: number, content: string) {
+    return request<{ success: boolean; comment: Comment; postUserId: number }>(`/posts/${postId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    })
+  },
+
+  deletePost(postId: number) {
+    return request<{ success: boolean }>(`/posts/${postId}`, {
+      method: 'DELETE',
+    })
+  },
+
+  // VIP
+  getVipPlans() {
+    return request<{ success: boolean; plans: Array<{ id: string; name: string; price: number; days: number; badge: string }> }>('/vip/plans')
+  },
+
+  getVipStatus() {
+    return request<{ success: boolean; vip: number; expiresAt: string | null; wechatQrcode: string }>('/vip/status')
+  },
+
+  payVip(planId: string) {
+    return request<{ success: boolean; qrcode: string; outTradeNo: string; mock?: boolean; plan?: any; message?: string; payjsUrl?: string }>('/vip/pay', {
+      method: 'POST',
+      body: JSON.stringify({ planId }),
+    })
+  },
+
+  checkVipOrder(outTradeNo: string) {
+    return request<{ success: boolean; status: string; paid: boolean }>('/vip/check', {
+      method: 'POST',
+      body: JSON.stringify({ outTradeNo }),
+    })
+  },
+
+  confirmVipPayment(outTradeNo: string) {
+    return request<{ success: boolean; message: string; vip: number; expiresAt: string }>('/vip/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ outTradeNo }),
+    })
+  },
+
+  // AI 聊天
+  sendAiMessage(message: string) {
+    return request<{ success: boolean; reply: string }>('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    })
+  },
+
+  // 群聊
+  getGroups() {
+    return request<{ success: boolean; groups: GroupInfo[] }>('/groups')
+  },
+
+  createGroup(name: string, memberIds: number[]) {
+    return request<{ success: boolean; group: GroupInfo }>('/groups', {
+      method: 'POST',
+      body: JSON.stringify({ name, memberIds }),
+    })
+  },
+
+  getGroupMembers(groupId: number) {
+    return request<{ success: boolean; members: Array<{ id: number; username: string; avatar: string; role: string }> }>(`/groups/${groupId}/members`)
+  },
+
+  getGroupMessages(groupId: number) {
+    return request<{ success: boolean; messages: GroupMessage[] }>(`/groups/${groupId}/messages`)
+  },
+
+  addGroupMembers(groupId: number, newMemberIds: number[]) {
+    return request<{ success: boolean; added: number; memberCount: number }>(`/groups/${groupId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ newMemberIds }),
+    })
+  },
+
+  removeGroupMember(groupId: number, memberId: number) {
+    return request<{ success: boolean }>(`/groups/${groupId}/members/${memberId}`, {
+      method: 'DELETE',
+    })
+  },
+
+  updateGroupName(groupId: number, name: string) {
+    return request<{ success: boolean }>(`/groups/${groupId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    })
+  },
+
+  leaveGroup(groupId: number) {
+    return request<{ success: boolean }>(`/groups/${groupId}/leave`, {
+      method: 'POST',
+    })
+  },
+
+  deleteGroup(groupId: number) {
+    return request<{ success: boolean }>(`/groups/${groupId}`, {
+      method: 'DELETE',
+    })
+  },
+
+  getGroupDetail(groupId: number) {
+    return request<{ success: boolean; group: { id: number; name: string; avatar: string; ownerId: number; memberCount: number; ownerName: string; createdAt: string } }>(`/groups/${groupId}`)
+  },
+
+  // 未读消息
+  getUnread() {
+    return request<{ success: boolean; unread: Array<{ targetType: 'friend' | 'group'; targetId: number; count: number; lastMessage: string; lastSenderId: number; lastTimestamp: string }> }>('/unread')
+  },
+
+  clearUnread(targetType: 'friend' | 'group', targetId: number) {
+    return request<{ success: boolean }>('/unread/clear', {
+      method: 'POST',
+      body: JSON.stringify({ targetType, targetId }),
+    })
+  },
 }
 
 export interface Message {
@@ -139,4 +313,47 @@ export interface Message {
   type: 'text' | 'image' | 'file'
   fileUrl: string
   timestamp: string
+}
+
+export interface Post {
+  id: number
+  userId: number
+  content: string
+  imageUrl: string
+  createdAt: string
+  username: string
+  avatar: string
+  commentCount: number
+}
+
+export interface Comment {
+  id: number
+  postId: number
+  userId: number
+  content: string
+  createdAt: string
+  username: string
+  avatar: string
+}
+
+export interface GroupMessage {
+  id: number
+  groupId: number
+  senderId: number
+  content: string
+  type: 'text' | 'image' | 'file'
+  fileUrl: string
+  timestamp: string
+  senderName: string
+  senderAvatar: string
+}
+
+export interface GroupInfo {
+  id: number
+  name: string
+  avatar: string
+  ownerId: number
+  memberCount: number
+  lastMessage?: string
+  lastMessageTime?: string
 }

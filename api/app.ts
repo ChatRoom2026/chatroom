@@ -20,6 +20,11 @@ import uploadRoutes from './routes/upload.js'
 import userRoutes from './routes/user.js'
 import verificationRoutes from './routes/verification.js'
 import downloadRoutes from './routes/download.js'
+import postsRoutes from './routes/posts.js'
+import vipRoutes from './routes/vip.js'
+import aiRoutes from './routes/ai.js'
+import groupRoutes from './routes/groups.js'
+import unreadRoutes from './routes/unread.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -51,6 +56,11 @@ app.use('/api/upload', uploadRoutes)
 app.use('/api/user', userRoutes)
 app.use('/api/verification', verificationRoutes)
 app.use('/api/download', downloadRoutes)
+app.use('/api/posts', postsRoutes)
+app.use('/api/vip', vipRoutes)
+app.use('/api/ai', aiRoutes)
+app.use('/api/groups', groupRoutes)
+app.use('/api/unread', unreadRoutes)
 
 /**
  * health

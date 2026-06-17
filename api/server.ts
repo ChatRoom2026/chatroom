@@ -34,6 +34,7 @@ function cleanupDeactivatedUsers() {
 
     const cleanup = db.transaction(() => {
       for (const user of deactivatedUsers) {
+        db.prepare('DELETE FROM friend_requests WHERE senderId = ? OR receiverId = ?').run(user.id, user.id)
         db.prepare('DELETE FROM friendships WHERE userId = ? OR friendId = ?').run(user.id, user.id)
         db.prepare('DELETE FROM messages WHERE senderId = ? OR receiverId = ?').run(user.id, user.id)
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id)

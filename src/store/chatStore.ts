@@ -1,12 +1,15 @@
 import { create } from 'zustand'
-import { api, type Message } from '@/lib/api'
+import { api, type Message, type GroupMessage } from '@/lib/api'
 
 interface ChatState {
   messages: Record<number, Message[]>
+  groupMessages: Record<number, GroupMessage[]>
   onlineUsers: number[]
   typingUsers: Record<number, boolean>
   loadMessages: (friendId: number) => Promise<void>
+  loadGroupMessages: (groupId: number) => Promise<void>
   addMessage: (message: Message) => void
+  addGroupMessage: (message: GroupMessage) => void
   clearMessages: (friendId: number) => void
   setOnlineUsers: (users: number[]) => void
   setTypingUser: (userId: number, isTyping: boolean) => void
@@ -14,6 +17,7 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
+  groupMessages: {},
   onlineUsers: [],
   typingUsers: {},
 
@@ -24,6 +28,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
   },
 
+  loadGroupMessages: async (groupId) => {
+    const res = await api.getGroupMessages(groupId)
+    set((state) => ({
+      groupMessages: { ...state.groupMessages, [groupId]: res.messages },
+    }))
+  },
+
   addMessage: (message) => {
     set((state) => {
       const friendId = message.senderId === (JSON.parse(localStorage.getItem('user') || '{}').id)
@@ -31,7 +42,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         : message.senderId
 
       const existing = state.messages[friendId] || []
-      // 避免重复消息
       if (existing.some((m) => m.id === message.id)) {
         return state
       }
@@ -40,6 +50,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
         messages: {
           ...state.messages,
           [friendId]: [...existing, message],
+        },
+      }
+    })
+  },
+
+  addGroupMessage: (message) => {
+    set((state) => {
+      const existing = state.groupMessages[message.groupId] || []
+      if (existing.some((m) => m.id === message.id)) {
+        return state
+      }
+      return {
+        groupMessages: {
+          ...state.groupMessages,
+          [message.groupId]: [...existing, message],
         },
       }
     })
