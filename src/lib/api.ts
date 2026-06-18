@@ -1,6 +1,7 @@
 /**
  * API 请求工具
  * 支持浏览器和 Capacitor Android 客户端
+ * 网络错误 / 服务器不可达：触发全局 'server-offline' 事件，App.tsx 会处理跳转到首页并提示
  */
 
 import { isAndroid, isNativeApp } from './platform'
@@ -9,10 +10,8 @@ import { isAndroid, isNativeApp } from './platform'
 // 浏览器开发：使用 vite proxy 转发 /api
 function detectApiBase(): string {
   if (isNativeApp() && isAndroid()) {
-    // 优先从 localStorage 读取用户配置的服务器地址
     const stored = localStorage.getItem('api_base_url')
     if (stored) return stored
-    // 默认指向本机（需要 adb reverse tcp:3001 tcp:3001）
     return 'http://10.0.2.2:3001/api'
   }
   return '/api'
@@ -27,6 +26,21 @@ export function setApiBaseUrl(url: string) {
 
 export function getApiBaseUrl(): string {
   return API_BASE
+}
+
+/** 判断错误是否属于"无法连接到服务器"（网络不可达 / DNS 失败 / 连接拒绝 / 超时） */
+function isNetworkError(err: any): boolean {
+  if (!err) return false
+  const msg = (err.message || String(err)).toLowerCase()
+  if (err instanceof TypeError && (msg.includes('fetch') || msg.includes('network') || msg.includes('offline'))) {
+    return true
+  }
+  if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('net::err_') ||
+      msg.includes('connection refused') || msg.includes('timeout') || msg.includes('dns') ||
+      msg.includes('unreachable')) {
+    return true
+  }
+  return false
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -44,26 +58,60 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     delete headers['Content-Type']
   }
 
-  const res = await fetch(`${API_BASE}${url}`, {
-    ...options,
-    headers,
-  })
-
-  // 检查响应是否为 JSON
-  const contentType = res.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) {
-    // 尝试获取文本内容用于调试
-    const text = await res.text().catch(() => '')
-    throw new Error(text ? `服务器返回了非 JSON 响应 (${res.status})` : '网络错误，请检查服务器是否在运行')
+  // 浏览器无网络：直接提示
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    window.dispatchEvent(new CustomEvent('server-offline', {
+      detail: { message: '当前无网络连接，请检查网络后重试' },
+    }))
+    throw new Error('当前无网络连接，请检查网络后重试')
   }
 
-  const data = await res.json()
+  try {
+    const res = await fetch(`${API_BASE}${url}`, {
+      ...options,
+      headers,
+    })
 
-  if (!res.ok) {
-    throw new Error(data.error || '请求失败')
+    const contentType = res.headers.get('content-type') || ''
+    if (!contentType.includes('application/json')) {
+      const text = await res.text().catch(() => '')
+      const errMsg = text ? `服务器返回了非 JSON 响应 (${res.status})` : '网络错误，请检查服务器是否在运行'
+      // 404 / 502 / 503 / 504 等通常意味着服务已下线
+      if (res.status === 0 || res.status >= 500 || res.status === 404) {
+        window.dispatchEvent(new CustomEvent('server-offline', {
+          detail: { message: errMsg, status: res.status },
+        }))
+      }
+      throw new Error(errMsg)
+    }
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      // 401 / 403：认证失败不算网络问题
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(data.error || '认证失败，请重新登录')
+      }
+      // 5xx：服务器不可达
+      if (res.status >= 500) {
+        window.dispatchEvent(new CustomEvent('server-offline', {
+          detail: { message: `服务器异常 (${res.status})，请稍后重试`, status: res.status },
+        }))
+      }
+      throw new Error(data.error || '请求失败')
+    }
+
+    return data
+  } catch (err: any) {
+    // 最常见的网络错误：fetch() 本身抛 TypeError → 服务器完全不可达
+    if (isNetworkError(err)) {
+      window.dispatchEvent(new CustomEvent('server-offline', {
+        detail: { message: '无法连接到服务器，请检查网络或服务器地址' },
+      }))
+      throw new Error('无法连接到服务器，请检查网络或服务器地址')
+    }
+    throw err
   }
-
-  return data
 }
 
 export const api = {
