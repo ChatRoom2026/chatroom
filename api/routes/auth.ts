@@ -120,7 +120,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
 
     res.status(201).json({
       success: true,
-      user: { id: userId, username, email, avatar: '' },
+      user: { id: userId, username, email, avatar: '', bio: '', gender: '', region: '', vip: 0 },
       token,
     })
   } catch (error) {
@@ -143,7 +143,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     }
 
     const user = db.prepare(`
-      SELECT id, username, password, phone, email, avatar, vip, vipExpiresAt FROM users
+      SELECT id, username, password, phone, email, avatar, bio, gender, region, vip, vipExpiresAt FROM users
       WHERE (username = ? OR phone = ? OR email = ?) AND active = 1
     `).get(loginId, loginId, loginId) as any
 
@@ -176,6 +176,9 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
         phone: user.phone || '',
         email: user.email || '',
         avatar: user.avatar || '',
+        bio: user.bio || '',
+        gender: user.gender || '',
+        region: user.region || '',
         vip,
       },
       token,

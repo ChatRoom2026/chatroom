@@ -212,6 +212,15 @@ try {
 try {
   db.exec(`ALTER TABLE users ADD COLUMN wechatQrcode TEXT DEFAULT ''`)
 } catch { /* 列已存在 */ }
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''`)
+} catch { /* 列已存在 */ }
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN gender TEXT DEFAULT ''`)
+} catch { /* 列已存在 */ }
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN region TEXT DEFAULT ''`)
+} catch { /* 列已存在 */ }
 
 // 修复：确保所有现有用户的 active 不为 NULL（兼容旧数据库升级）
 db.exec(`UPDATE users SET active = 1 WHERE active IS NULL`)

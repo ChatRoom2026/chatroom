@@ -131,6 +131,23 @@ export const api = {
   },
 
   // 用户
+  getProfile() {
+    return request<{
+      success: boolean
+      user: {
+        id: number
+        username: string
+        phone: string
+        email: string
+        avatar: string
+        bio: string
+        gender: string
+        region: string
+        vip: number
+      }
+    }>('/user/profile')
+  },
+
   updateAvatar(avatarUrl: string) {
     return request<{ success: boolean; avatar: string }>('/user/avatar', {
       method: 'POST',
@@ -138,10 +155,10 @@ export const api = {
     })
   },
 
-  updateProfile(username: string) {
-    return request<{ success: boolean; username: string }>('/user/profile', {
+  updateProfile(payload: { username?: string; bio?: string; gender?: string; region?: string }) {
+    return request<{ success: boolean }>('/user/profile', {
       method: 'PUT',
-      body: JSON.stringify({ username }),
+      body: JSON.stringify(payload),
     })
   },
 

@@ -25,6 +25,30 @@ function authMiddleware(req: Request, res: Response, next: any) {
 }
 
 /**
+ * 获取当前用户的完整资料
+ * GET /api/user/profile
+ */
+router.get('/profile', authMiddleware, (req: Request, res: Response): void => {
+  try {
+    const userId = (req as any).user.id
+    const user = db.prepare(`
+      SELECT id, username, phone, email, avatar, bio, gender, region, vip, vipExpiresAt, active
+      FROM users WHERE id = ?
+    `).get(userId) as any
+
+    if (!user) {
+      res.status(404).json({ success: false, error: '用户不存在' })
+      return
+    }
+
+    res.json({ success: true, user })
+  } catch (error) {
+    console.error('Get profile error:', error)
+    res.status(500).json({ success: false, error: '服务器内部错误' })
+  }
+})
+
+/**
  * 更新用户头像
  * POST /api/user/avatar
  */
@@ -48,34 +72,64 @@ router.post('/avatar', authMiddleware, (req: Request, res: Response): void => {
 })
 
 /**
- * 更新用户资料（用户名）
+ * 更新用户资料（用户名、性别、地区、简介）
  * PUT /api/user/profile
  */
 router.put('/profile', authMiddleware, (req: Request, res: Response): void => {
   try {
     const userId = (req as any).user.id
-    const { username } = req.body
+    const { username, bio, gender, region } = req.body
 
-    if (!username) {
-      res.status(400).json({ success: false, error: '用户名不能为空' })
+    // 验证字段
+    if (username !== undefined) {
+      if (!username) {
+        res.status(400).json({ success: false, error: '用户名不能为空' })
+        return
+      }
+      if (username.length < 2 || username.length > 20) {
+        res.status(400).json({ success: false, error: '用户名长度需在2-20个字符之间' })
+        return
+      }
+      // 检查新用户名是否已被其他活跃用户使用
+      const existing = db.prepare('SELECT id FROM users WHERE username = ? AND active = 1 AND id != ?').get(username, userId)
+      if (existing) {
+        res.status(400).json({ success: false, error: '该用户名已被使用' })
+        return
+      }
+    }
+
+    if (bio !== undefined && bio.length > 200) {
+      res.status(400).json({ success: false, error: '简介不能超过 200 个字符' })
       return
     }
 
-    if (username.length < 2 || username.length > 20) {
-      res.status(400).json({ success: false, error: '用户名长度需在2-20个字符之间' })
+    if (gender !== undefined && !['male', 'female', '', 'other'].includes(gender)) {
+      res.status(400).json({ success: false, error: '性别参数无效' })
       return
     }
 
-    // 检查新用户名是否已被其他活跃用户使用
-    const existing = db.prepare('SELECT id FROM users WHERE username = ? AND active = 1 AND id != ?').get(username, userId)
-    if (existing) {
-      res.status(400).json({ success: false, error: '该用户名已被使用' })
+    if (region !== undefined && region.length > 30) {
+      res.status(400).json({ success: false, error: '地区不能超过 30 个字符' })
       return
     }
 
-    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, userId)
+    // 构建动态 UPDATE
+    const fields: string[] = []
+    const values: any[] = []
+    if (username !== undefined) { fields.push('username = ?'); values.push(username) }
+    if (bio !== undefined)      { fields.push('bio = ?');      values.push(bio) }
+    if (gender !== undefined)   { fields.push('gender = ?');   values.push(gender) }
+    if (region !== undefined)   { fields.push('region = ?');   values.push(region) }
 
-    res.json({ success: true, username })
+    if (fields.length === 0) {
+      res.status(400).json({ success: false, error: '没有要更新的字段' })
+      return
+    }
+
+    values.push(userId)
+    db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+
+    res.json({ success: true })
   } catch (error) {
     console.error('Update profile error:', error)
     res.status(500).json({ success: false, error: '服务器内部错误' })

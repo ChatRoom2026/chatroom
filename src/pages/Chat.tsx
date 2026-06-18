@@ -5,6 +5,7 @@ import { useChatStore } from '@/store/chatStore'
 import { useUnreadStore } from '@/store/unreadStore'
 import { api, type Message, type GroupMessage, type GroupInfo } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
+import { MediaPreview } from '@/components/MediaPreview'
 import { ArrowLeft, Send, Paperclip, Image, FileText, Ban, X, UserPlus, Users, Edit2, LogOut, Crown, VideoIcon } from 'lucide-react'
 
 export default function Chat() {
@@ -14,7 +15,6 @@ export default function Chat() {
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
-  const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [aiMessages, setAiMessages] = useState<Array<{ id: string; role: 'user' | 'ai'; content: string; timestamp: string }>>([])
   const [groupInfo, setGroupInfo] = useState<GroupInfo | null>(null)
   const [groupMembers, setGroupMembers] = useState<Array<{ id: number; username: string; avatar: string; role: string }>>([])
@@ -509,25 +509,13 @@ export default function Chat() {
                     )}
                     {msg.type === 'image' && (
                       <div>
-                        <button onClick={() => setPreviewImage(msg.fileUrl)} className="block w-full text-left">
-                          <img
-                            src={msg.fileUrl}
-                            alt={msg.content}
-                            className="max-w-60 rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
-                            loading="lazy"
-                          />
-                        </button>
+                        <MediaPreview type="image" url={msg.fileUrl} filename={msg.content} thumbSize={240} />
                         <p className={`text-xs mt-1 ${isMine ? 'text-right' : 'text-left'}`}>{msg.content}</p>
                       </div>
                     )}
                     {msg.type === 'video' && (
-                      <div className={`space-y-1 max-w-full overflow-hidden`}>
-                        <video
-                          src={msg.fileUrl}
-                          controls
-                          preload="metadata"
-                          className="max-w-60 max-h-60 rounded-2xl bg-black"
-                        />
+                      <div className={`space-y-1`}>
+                        <MediaPreview type="video" url={msg.fileUrl} filename={msg.content} thumbSize={240} />
                         <p className={`text-xs text-gray-400 break-all ${isMine ? 'text-right' : 'text-left'}`}>
                           {msg.content}
                         </p>
@@ -603,27 +591,15 @@ export default function Chat() {
                   )}
                   {msg.type === 'image' && (
                     <div className={`space-y-1 max-w-full overflow-hidden ${isMine && user?.vip === 1 ? 'border border-yellow-400/50 rounded-2xl p-1' : ''}`}>
-                      <button onClick={() => setPreviewImage(msg.fileUrl)} className="block text-left max-w-full">
-                        <img
-                          src={msg.fileUrl}
-                          alt={msg.content}
-                          className="max-w-60 max-h-60 object-contain rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
-                          loading="lazy"
-                        />
-                      </button>
+                      <MediaPreview type="image" url={msg.fileUrl} filename={msg.content} thumbSize={240} />
                       <p className={`text-xs text-gray-400 break-all ${isMine ? 'text-right' : 'text-left'}`}>
                         {msg.content}
                       </p>
                     </div>
                   )}
                   {msg.type === 'video' && (
-                    <div className={`space-y-1 max-w-full overflow-hidden`}>
-                      <video
-                        src={msg.fileUrl}
-                        controls
-                        preload="metadata"
-                        className="max-w-60 max-h-60 rounded-2xl bg-black"
-                      />
+                    <div className={`space-y-1 max-w-full overflow-hidden ${isMine && user?.vip === 1 ? 'border border-yellow-400/50 rounded-2xl p-1' : ''}`}>
+                      <MediaPreview type="video" url={msg.fileUrl} filename={msg.content} thumbSize={240} />
                       <p className={`text-xs text-gray-400 break-all ${isMine ? 'text-right' : 'text-left'}`}>
                         {msg.content}
                       </p>
@@ -727,27 +703,6 @@ export default function Chat() {
           </div>
         )}
       </div>
-
-      {/* 图片预览弹窗 */}
-      {previewImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center"
-          onClick={() => setPreviewImage(null)}
-        >
-          <button
-            onClick={() => setPreviewImage(null)}
-            className="absolute top-4 right-4 p-2 text-white hover:text-gray-300 bg-black/50 rounded-full transition-colors"
-          >
-            <X className="w-6 h-6" />
-          </button>
-          <img
-            src={previewImage}
-            alt="预览"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
 
       {/* 添加成员模态框 */}
       {showAddMemberModal && (
