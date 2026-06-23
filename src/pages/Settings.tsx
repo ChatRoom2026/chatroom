@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
-import { api, setApiBaseUrl, getApiBaseUrl } from '@/lib/api'
+import { api, setApiBaseUrl, getApiBaseUrl, resolveStaticUrl } from '@/lib/api'
 import { isAndroid, isNativeApp, getPlatform } from '@/lib/platform'
 import {
   ArrowLeft, Camera, Trash2, User, Loader2, Server, Smartphone,
