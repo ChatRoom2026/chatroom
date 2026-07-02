@@ -14,6 +14,10 @@ function detectApiBase(): string {
     if (stored) return stored
     return 'http://10.0.2.2:3001/api'
   }
+  // 生产构建：使用 VITE_API_BASE 环境变量
+  if (import.meta.env.VITE_API_BASE) {
+    return import.meta.env.VITE_API_BASE
+  }
   return '/api'
 }
 
@@ -29,10 +33,13 @@ export function getBackendBase(): string {
   if (isNativeApp() && isAndroid()) {
     const stored = localStorage.getItem('api_base_url')
     if (stored) {
-      // 去掉末尾的 /api
       return stored.replace(/\/api\/?$/, '')
     }
     return 'http://10.0.2.2:3001'
+  }
+  // 生产构建：使用 VITE_API_BASE 环境变量
+  if (import.meta.env.VITE_API_BASE) {
+    return import.meta.env.VITE_API_BASE.replace(/\/api\/?$/, '')
   }
   // 开发/预览环境：使用当前页面 origin 作为后端地址
   if (typeof window !== 'undefined') {
