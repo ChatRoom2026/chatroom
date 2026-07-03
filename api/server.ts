@@ -1,21 +1,20 @@
 /**
- * 服务端入口 —— 单核服务器极限优化版
+ * 服务端入口 —— 500 用户极限优化版
  *
- * 启动建议（单核 + 低内存场景）:
+ * 启动命令（1GB 内存服务器）:
  *   node \
- *     --max-old-space-size=256 \         # 限制 V8 heap，防止 OOM
- *     --jitless \                         # 关闭 JIT（内存 30-40%，在单核上 JIT 开销更大）
- *     --no-node-snapshot \                # 禁用运行时快照生成
- *     --experimental-webtransport=off \
+ *     --max-old-space-size=384 \         # V8 heap 384MB，留 640MB 给 OS + 连接
+ *     --optimize-for-size \              # 优先内存而非速度
+ *     --max-semi-space-size=2 \          # 新生代 2MB，减少 GC 停顿
+ *     --initial-old-space-size=128 \     # 老生代初始 128MB
  *     api/server.ts
  *
- * 改造：
- *   - SQLite WAL2 模式，写入性能 5-10x
- *   - stmtCache 预编译 statement，避免每次请求重新编译
- *   - Gzip 智能压缩（只压 JSON/文本，且需要超过 1KB）
- *   - 未捕获异常 / Promise 拒绝处理，防止崩溃直接退出
- *   - SIGTERM / SIGINT 优雅退出
- *   - 定时清理 uploads / 已注销账号（节省存储）
+ * 优化：
+ *   - SQLite WAL2 + 64MB cache + 128MB mmap（1GB 内存下平衡）
+ *   - Socket.IO 500 连接：心跳 25s + 仅 >2KB 压缩 + 5MB 消息上限
+ *   - 自动清理：图片 30 天 / 视频 15 天 / 聊天文字 60 天
+ *   - 批量写入缓冲 100ms，减少事务锁竞争
+ *   - 优雅退出 + 未捕获异常兜底
  */
 import http from 'http'
 import fs from 'fs'
@@ -112,50 +111,76 @@ setTimeout(() => {
   setInterval(cleanupDeactivatedUsers, CLEANUP_INTERVAL)
 }, CLEANUP_DELAY)
 
-// ============ 定时清理上传目录（7 天前的文件自动删除） ============
-const UPLOAD_EXPIRE_DAYS = 7
-const UPLOAD_CLEANUP_INTERVAL = 24 * 60 * 60 * 1000
+// ============ 定时清理上传目录（按文件类型分策略） ============
+// 图片保留 30 天，视频保留 15 天
+const UPLOAD_CLEANUP_INTERVAL = 60 * 60 * 1000 // 每小时
 
 function cleanupExpiredUploads(): void {
   try {
     const uploadDir = path.join(__dirname, '..', 'uploads')
-    if (!fs.existsSync(uploadDir)) {
-      console.log('[清理上传] uploads 目录不存在，跳过')
-      return
-    }
-    const cutoff = Date.now() - UPLOAD_EXPIRE_DAYS * 24 * 60 * 60 * 1000
+    if (!fs.existsSync(uploadDir)) return
+    const now = Date.now()
     const files = fs.readdirSync(uploadDir)
-    let removed = 0
-    let totalFreed = 0
+    let removed = 0, totalFreed = 0
     for (let i = 0; i < files.length; i++) {
       const fullPath = path.join(uploadDir, files[i])
       try {
         const stat = fs.statSync(fullPath)
         if (!stat.isFile()) continue
-        if (stat.mtimeMs < cutoff) {
+        const ext = path.extname(files[i]).toLowerCase()
+        const isVideo = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.3gp'].includes(ext)
+        const expireDays = isVideo ? 15 : 30
+        if (stat.mtimeMs < now - expireDays * 24 * 60 * 60 * 1000) {
           totalFreed += stat.size
           fs.unlinkSync(fullPath)
           removed++
         }
-      } catch (err: any) {
-        console.warn(`[清理上传] 文件 ${files[i]} 处理失败:`, err.message)
-      }
+      } catch (err: any) { /* skip */ }
     }
     if (removed > 0) {
-      const mb = (totalFreed / 1024 / 1024).toFixed(2)
-      console.log(`[清理上传] 删除 ${removed} 个过期文件，释放 ${mb} MB`)
-    } else {
-      console.log(`[清理上传] 无过期文件，当前共 ${files.length} 个文件`)
+      console.log(`[清理上传] 删除 ${removed} 个过期文件，释放 ${(totalFreed / 1024 / 1024).toFixed(2)} MB`)
     }
-  } catch (error) {
-    console.error('[清理上传] 执行失败:', error)
-  }
+  } catch (error) { /* skip */ }
+}
+
+// ============ 定时清理聊天记录（文字 60 天） ============
+const CHAT_CLEANUP_INTERVAL = 6 * 60 * 60 * 1000 // 6 小时
+
+function cleanupExpiredMessages(): void {
+  try {
+    const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+    const dmDeleted = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(cutoff)
+    const groupDeleted = db.prepare('DELETE FROM group_messages WHERE timestamp < ?').run(cutoff)
+    if (dmDeleted.changes > 0 || groupDeleted.changes > 0) {
+      console.log(`[清理消息] 私聊 ${dmDeleted.changes} 条 + 群聊 ${groupDeleted.changes} 条`)
+    }
+    // 清理期间执行 WAL checkpoint 回收磁盘
+    try { db.pragma('wal_checkpoint(TRUNCATE)') } catch {}
+  } catch (error) { /* skip */ }
+}
+
+// ============ 定时清理过期验证码（30 分钟） ============
+function cleanupExpiredCodes(): void {
+  try {
+    const r = db.prepare('DELETE FROM verification_codes WHERE expiresAt < ?').run(new Date().toISOString())
+    if (r.changes > 0) console.log(`[清理验证码] ${r.changes} 条`)
+  } catch {}
 }
 
 setTimeout(() => {
   cleanupExpiredUploads()
   setInterval(cleanupExpiredUploads, UPLOAD_CLEANUP_INTERVAL)
 }, 5 * 1000)
+
+setTimeout(() => {
+  cleanupExpiredMessages()
+  setInterval(cleanupExpiredMessages, CHAT_CLEANUP_INTERVAL)
+}, 10 * 1000)
+
+setTimeout(() => {
+  cleanupExpiredCodes()
+  setInterval(cleanupExpiredCodes, 30 * 60 * 1000)
+}, 15 * 1000)
 
 // ============ 优雅退出 ============
 let shuttingDown = false

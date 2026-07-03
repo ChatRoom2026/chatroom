@@ -39,17 +39,19 @@ const db = new Database(dbPath, {
 // WAL2（fallback 到 WAL）—— 读写真正并发，写入延迟 ~0.1ms
 try { db.pragma('journal_mode = WAL2') } catch { db.pragma('journal_mode = WAL') }
 db.pragma('synchronous = NORMAL')
-// 256MB 内部缓存（每页 4KB，-262144 = 262144 * 1024 bytes）
-db.pragma('cache_size = -262144')
-// 512MB mmap：热读走 OS page cache —— 小体量应用几乎完全内存化
-db.pragma('mmap_size = 536870912')
+// 64MB 内部缓存（1GB 内存下兼顾 500 用户，每页 4KB）
+db.pragma('cache_size = -65536')
+// 128MB mmap：热读走 OS page cache
+db.pragma('mmap_size = 134217728')
 db.pragma('temp_store = MEMORY')
-db.pragma('busy_timeout = 3000')
-// 每 1000 页触发一次 checkpoint（约 4MB）
-db.pragma('wal_autocheckpoint = 1000')
-try { db.pragma('journal_size_limit = 33554432') } catch {} // 32MB
+db.pragma('busy_timeout = 5000')
+// 每 500 页自动 checkpoint（~2MB），减少 WAL 堆积
+db.pragma('wal_autocheckpoint = 500')
+try { db.pragma('journal_size_limit = 16777216') } catch {} // 16MB
 // 分析当前表统计，让查询优化器选更好的计划
 try { db.pragma('optimize') } catch {}
+// 限制 LIKE 查询使用索引
+db.pragma('case_sensitive_like = OFF')
 
 // ==================== 表结构 ====================
 db.exec(`
@@ -203,6 +205,10 @@ db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_unread_user_target ON unread_coun
 db.exec(`CREATE INDEX IF NOT EXISTS idx_group_invitations_invitee ON group_invitations(inviteeId, status);`)
 
 // 用户名查找：UNIQUE 已有隐式索引，不需要额外建
+
+// 消息时间戳索引（清理 60 天消息用）
+db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(timestamp);`)
+db.exec(`CREATE INDEX IF NOT EXISTS idx_group_messages_ts ON group_messages(timestamp);`)
 
 // ==================== 兼容旧表结构 ====================
 try { db.exec(`ALTER TABLE users ADD COLUMN deactivatedAt DATETIME DEFAULT NULL`) } catch {}

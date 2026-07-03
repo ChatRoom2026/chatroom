@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "NODE_ENV=production tsx api/server.ts",
-    "start:lean": "NODE_ENV=production node --max-old-space-size=256 --jitless --no-node-snapshot --import tsx api/server.ts",
+    "start:lean": "NODE_ENV=production node --max-old-space-size=384 --optimize-for-size --max-semi-space-size=2 --initial-old-space-size=128 --import tsx api/server.ts",
+    "start:min": "NODE_ENV=production node --max-old-space-size=256 --jitless --no-node-snapshot --import tsx api/server.ts",
     "client:dev": "vite",
     "build": "vite build",
     "build:analyze": "vite build --mode=analyze",

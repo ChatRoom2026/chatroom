@@ -28,6 +28,28 @@ import {
 // =============== 优化 1：反向索引（userId -> socketId[]） ===============
 const localSockets = new Map<string, { socket: any; userId: number; username: string }>()
 const userToSocketIds = new Map<number, Set<string>>()
+// 消息频率限制（每用户每秒最多 5 条）
+const messageRateLimit = new Map<number, { count: number; reset: number }>()
+const MESSAGE_RATE_MAX = 5
+const MESSAGE_RATE_WINDOW = 1000
+
+function checkRateLimit(userId: number): boolean {
+  const now = Date.now()
+  const entry = messageRateLimit.get(userId)
+  if (!entry || now > entry.reset) {
+    messageRateLimit.set(userId, { count: 1, reset: now + MESSAGE_RATE_WINDOW })
+    return true
+  }
+  if (entry.count >= MESSAGE_RATE_MAX) return false
+  entry.count++
+  return true
+}
+
+// 定期清理频率限制 map
+setInterval(() => {
+  const now = Date.now()
+  messageRateLimit.forEach((v, k) => { if (now > v.reset) messageRateLimit.delete(k) })
+}, 60000)
 
 function addSocketMapping(socketId: string, userId: number, username: string, socket: any): void {
   localSockets.set(socketId, { socket, userId, username })
@@ -169,11 +191,22 @@ export function initSocket(server: HTTPServer): SocketIOServer {
   io = new SocketIOServer(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
     transports: ['websocket', 'polling'],
-    pingInterval: 15000,
-    pingTimeout: 10000,
-    perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: 1 } },
-    maxHttpBufferSize: 10 * 1024 * 1024,
-    upgradeTimeout: 10000,
+    // 500 连接：心跳间隔 25s，超时 15s
+    pingInterval: 25000,
+    pingTimeout: 15000,
+    // 压缩：仅 >2KB 消息启用，level 1 最快
+    perMessageDeflate: { threshold: 2048, zlibDeflateOptions: { level: 1 } },
+    // 最大消息体 5MB（500 用户下降低内存峰值）
+    maxHttpBufferSize: 5 * 1024 * 1024,
+    // 连接超时 5s
+    connectTimeout: 5000,
+    // 禁用 cookie 解析（减少开销）
+    cookie: false,
+    // 不提供客户端 JS 文件
+    serveClient: false,
+    // 减少每连接初始 buffer
+    allowUpgrades: true,
+    upgradeTimeout: 5000,
   })
 
   startOnlineCleanup()
@@ -218,6 +251,10 @@ export function initSocket(server: HTTPServer): SocketIOServer {
     // 单聊消息
     socket.on('send_message', (data: { receiverId: number; content: string; type: string; fileUrl?: string }) => {
       try {
+        if (!checkRateLimit(user.id)) {
+          socket.emit('error', { message: '发送太快，请稍后再试' })
+          return
+        }
         const messageType = data.type || 'text'
         const fileUrl = data.fileUrl || ''
 
@@ -284,6 +321,10 @@ export function initSocket(server: HTTPServer): SocketIOServer {
     // 群聊消息
     socket.on('send_group_message', (data: { groupId: number; content: string; type: string; fileUrl?: string }) => {
       try {
+        if (!checkRateLimit(user.id)) {
+          socket.emit('error', { message: '发送太快，请稍后再试' })
+          return
+        }
         const messageType = data.type || 'text'
         const fileUrl = data.fileUrl || ''
         const now = new Date().toISOString()
