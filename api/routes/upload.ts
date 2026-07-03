@@ -1,6 +1,6 @@
 /**
  * 文件上传路由 —— 单核极限优化版
- * 支持 multer FormData 上传
+ * 优先使用 Cloudinary CDN，不可用时降级为本地存储
  */
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import multerLib from 'multer'
@@ -8,6 +8,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import crypto from 'crypto'
+import { v2 as cloudinary } from 'cloudinary'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -15,6 +16,12 @@ const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads')
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }) } catch {}
+}
+
+// Cloudinary 配置（从环境变量 CLOUDINARY_URL 读取）
+const cloudinaryEnabled = !!process.env.CLOUDINARY_URL
+if (cloudinaryEnabled) {
+  console.log('[upload] Cloudinary 已启用')
 }
 
 const router = Router()
@@ -72,20 +79,48 @@ function uploadErrorHandler(err: any, req: Request, res: Response, next: NextFun
 }
 
 // FormData 上传 (multipart/form-data)
-router.post('/', upload.single('file'), uploadErrorHandler, (req: Request, res: Response): void => {
+// 优先使用 Cloudinary，不可用时降级为本地存储
+router.post('/', upload.single('file'), uploadErrorHandler, async (req: Request, res: Response): Promise<void> => {
   try {
     if (!req.file) {
       res.status(400).json({ success: false, error: '缺少文件' })
       return
     }
 
-    // multer diskStorage 上传成功
+    const filePath = (req.file as any).path
+    const mimetype = req.file.mimetype
+    const isImage = mimetype.startsWith('image/')
+
+    // 尝试 Cloudinary 上传（仅图片和视频）
+    if (cloudinaryEnabled && (isImage || mimetype.startsWith('video/'))) {
+      try {
+        const result = await cloudinary.uploader.upload(filePath, {
+          resource_type: isImage ? 'image' : 'video',
+          transformation: isImage
+            ? [{ width: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }]
+            : undefined,
+        })
+        res.json({
+          success: true,
+          url: result.secure_url,
+          type: mimetype,
+          contentType: mimetype,
+          originalName: req.file.originalname,
+          cloudinary: true,
+        })
+        return
+      } catch (cloudErr: any) {
+        console.warn('[upload] Cloudinary 上传失败，降级为本地存储:', cloudErr?.message)
+      }
+    }
+
+    // 降级：本地存储
     const filename = (req.file as any).filename
     res.json({
       success: true,
       url: `/uploads/${filename}`,
-      type: req.file.mimetype,
-      contentType: req.file.mimetype,
+      type: mimetype,
+      contentType: mimetype,
       originalName: req.file.originalname,
     })
   } catch (error: any) {

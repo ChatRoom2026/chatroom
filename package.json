@@ -36,6 +36,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.10.0",
+    "cloudinary": "^2.10.0",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
