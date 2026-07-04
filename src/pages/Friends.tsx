@@ -7,6 +7,7 @@ import { api, resolveStaticUrl, type GroupInfo } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
 import SafeImg from '@/components/SafeImg'
 import { MessageCircle, LogOut, UserPlus, Search, Users, Camera, Trash2, X, Settings as SettingsIcon, Newspaper, Crown, Bell, Check, Bot, Plus, Shield } from 'lucide-react'
+import NotificationBell from '@/components/NotificationBell'
 
 interface Friend {
   id: number
@@ -294,6 +295,7 @@ export default function Friends() {
               </div>
             </div>
             <div className="flex items-center gap-1">
+              <NotificationBell />
               <button
                 onClick={() => navigate('/settings')}
                 className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"

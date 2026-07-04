@@ -364,16 +364,30 @@ export const api = {
     return request<{ success: boolean; comments: Array<Comment> }>(`/posts/${postId}/comments`)
   },
 
-  createComment(postId: number, content: string) {
+  createComment(postId: number, content: string, parentId?: number, replyToUserId?: number) {
     return request<{ success: boolean; comment: Comment; postUserId: number }>(`/posts/${postId}/comments`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, parentId, replyToUserId }),
     })
   },
 
   deletePost(postId: number) {
     return request<{ success: boolean }>(`/posts/${postId}`, {
       method: 'DELETE',
+    })
+  },
+
+  // 通知
+  getNotifications() {
+    return request<{ success: boolean; notifications: Array<Notification> }>('/posts/notifications/list')
+  },
+  getNotificationUnread() {
+    return request<{ success: boolean; count: number }>('/posts/notifications/unread')
+  },
+  markNotificationRead(id?: number) {
+    return request<{ success: boolean }>('/posts/notifications/read', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
     })
   },
 
@@ -531,6 +545,22 @@ export interface Comment {
   bio?: string
   gender?: string
   region?: string
+  parentId?: number | null
+  replyToUserId?: number | null
+  replyToUsername?: string | null
+}
+
+export interface Notification {
+  id: number
+  type: 'comment' | 'reply'
+  postId: number
+  commentId: number | null
+  fromUserId: number
+  fromUsername: string
+  fromAvatar: string
+  content: string
+  isRead: number
+  createdAt: string
 }
 
 export interface GroupMessage {

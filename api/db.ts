@@ -109,6 +109,20 @@ db.exec(`
     postId INTEGER NOT NULL,
     userId INTEGER NOT NULL,
     content TEXT NOT NULL,
+    parentId INTEGER DEFAULT NULL,
+    replyToUserId INTEGER DEFAULT NULL,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    type TEXT NOT NULL DEFAULT 'comment',
+    postId INTEGER NOT NULL,
+    commentId INTEGER DEFAULT NULL,
+    fromUserId INTEGER NOT NULL,
+    content TEXT DEFAULT '',
+    isRead INTEGER DEFAULT 0,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -201,6 +215,11 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_user ON posts(userId);`)
 // 评论：按 postId 聚合
 db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(postId);`)
 db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_post_created ON comments(postId, createdAt ASC);`)
+db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parentId);`)
+
+// 通知：按用户 + 未读查询
+db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(userId, isRead);`)
+db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(userId, createdAt DESC);`)
 
 // 群聊：按成员聚合
 db.exec(`CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(groupId);`)
@@ -231,6 +250,10 @@ try { db.exec(`ALTER TABLE users ADD COLUMN region TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN faceDescriptor TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN isOfficial INTEGER DEFAULT 0`) } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN age INTEGER DEFAULT 0`) } catch {}
+
+// 兼容旧 comments 表：添加 parentId 和 replyToUserId 列
+try { db.exec(`ALTER TABLE comments ADD COLUMN parentId INTEGER DEFAULT NULL`) } catch {}
+try { db.exec(`ALTER TABLE comments ADD COLUMN replyToUserId INTEGER DEFAULT NULL`) } catch {}
 
 // 修复：确保所有现有用户的 active 不为 NULL（兼容旧数据库升级）
 db.exec(`UPDATE users SET active = 1 WHERE active IS NULL`)

@@ -167,6 +167,15 @@ function cleanupExpiredCodes(): void {
   } catch {}
 }
 
+// ============ 定时清理过期通知（60 天） ============
+function cleanupExpiredNotifications(): void {
+  try {
+    const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+    const r = db.prepare('DELETE FROM notifications WHERE createdAt < ?').run(cutoff)
+    if (r.changes > 0) console.log(`[清理通知] ${r.changes} 条`)
+  } catch {}
+}
+
 setTimeout(() => {
   cleanupExpiredUploads()
   setInterval(cleanupExpiredUploads, UPLOAD_CLEANUP_INTERVAL)
@@ -176,6 +185,11 @@ setTimeout(() => {
   cleanupExpiredMessages()
   setInterval(cleanupExpiredMessages, CHAT_CLEANUP_INTERVAL)
 }, 10 * 1000)
+
+setTimeout(() => {
+  cleanupExpiredNotifications()
+  setInterval(cleanupExpiredNotifications, CHAT_CLEANUP_INTERVAL)
+}, 15 * 1000)
 
 setTimeout(() => {
   cleanupExpiredCodes()

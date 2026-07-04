@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useMomentsStore } from '@/store/momentsStore'
 import { api, resolveStaticUrl, type Post, type Comment } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
-import { ArrowLeft, MessageCircle, Send, ImageIcon, Trash2, X, VideoIcon, Shield, Users, Globe } from 'lucide-react'
+import { ArrowLeft, MessageCircle, Send, ImageIcon, Trash2, X, VideoIcon, Shield, Users, Globe, Reply } from 'lucide-react'
 import UserProfileModal from '@/components/UserProfileModal'
 import SafeImg from '@/components/SafeImg'
 
@@ -19,12 +19,13 @@ type AuthorUser = {
 
 type TabType = 'official' | 'friends' | 'square'
 
-function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick }: { post: Post; onComment: () => void; onDelete: (id: number) => void; onEnlarge: (url: string) => void; onAvatarClick: (author: AuthorUser) => void }) {
+function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlightCommentId, clearHighlight }: { post: Post; onComment: () => void; onDelete: (id: number) => void; onEnlarge: (url: string) => void; onAvatarClick: (author: AuthorUser) => void; highlightCommentId?: number | null; clearHighlight?: () => void }) {
   const user = useAuthStore((s) => s.user)
   const [showComments, setShowComments] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
   const [commentText, setCommentText] = useState('')
   const [loadingComments, setLoadingComments] = useState(false)
+  const [replyTo, setReplyTo] = useState<{ commentId: number; username: string; userId: number } | null>(null)
 
   const loadComments = useCallback(async () => {
     setLoadingComments(true)
@@ -40,12 +41,42 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick }: { pos
     if (showComments) loadComments()
   }, [showComments, loadComments])
 
+  // 如果有关联高亮，自动展开评论
+  useEffect(() => {
+    if (highlightCommentId) {
+      setShowComments(true)
+    }
+  }, [highlightCommentId])
+
+  // 高亮评论：滚动到该评论位置，1.5秒后恢复
+  useEffect(() => {
+    if (highlightCommentId && showComments && comments.length > 0) {
+      setTimeout(() => {
+        const el = document.getElementById(`comment-${highlightCommentId}`)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          el.classList.add('highlight-comment')
+          setTimeout(() => {
+            el.classList.remove('highlight-comment')
+            clearHighlight?.()
+          }, 1500)
+        }
+      }, 300)
+    }
+  }, [highlightCommentId, showComments, comments, clearHighlight])
+
   const handleComment = async () => {
     if (!commentText.trim()) return
     try {
-      const res = await api.createComment(post.id, commentText.trim())
+      const res = await api.createComment(
+        post.id,
+        commentText.trim(),
+        replyTo?.commentId,
+        replyTo?.userId
+      )
       setComments((prev) => [...prev, res.comment])
       setCommentText('')
+      setReplyTo(null)
       onComment()
       const socket = getSocket()
       if (socket) {
@@ -69,6 +100,10 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick }: { pos
   }
 
   const isVideo = post.imageUrl ? /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(post.imageUrl) : false
+
+  // 将评论按嵌套关系组织：顶层评论 + 其回复
+  const topLevelComments = comments.filter((c) => !c.parentId)
+  const getReplies = (commentId: number) => comments.filter((c) => c.parentId === commentId)
 
   return (
     <div className="bg-[#1E293B] rounded-2xl overflow-hidden">
@@ -163,63 +198,124 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick }: { pos
           {loadingComments ? (
             <div className="p-4 text-center text-gray-500 text-sm">加载中...</div>
           ) : (
-            <div className="max-h-60 overflow-y-auto space-y-3 p-4">
+            <div className="max-h-80 overflow-y-auto space-y-2 p-4">
               {comments.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center">暂无评论</p>
               ) : (
-                comments.map((c) => (
-                  <div key={c.id} className="flex gap-2.5">
-                    <button onClick={() => onAvatarClick({ userId: c.userId, username: c.username, avatar: c.avatar, bio: c.bio, gender: c.gender, region: c.region })} className="flex-shrink-0">
-                      <SafeImg
-                        src={resolveStaticUrl(c.avatar || '')}
-                        fallback={
-                          <div className="w-7 h-7 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-semibold mt-0.5">
-                            {c.username[0]?.toUpperCase()}
+                topLevelComments.map((c) => {
+                  const replies = getReplies(c.id)
+                  return (
+                    <div key={c.id}>
+                      <div id={`comment-${c.id}`} className="flex gap-2.5 group transition-colors duration-300 rounded-lg p-1 -mx-1">
+                        <button onClick={() => onAvatarClick({ userId: c.userId, username: c.username, avatar: c.avatar, bio: c.bio, gender: c.gender, region: c.region })} className="flex-shrink-0">
+                          <SafeImg
+                            src={resolveStaticUrl(c.avatar || '')}
+                            fallback={
+                              <div className="w-7 h-7 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-semibold mt-0.5">
+                                {c.username[0]?.toUpperCase()}
+                              </div>
+                            }
+                            className="w-7 h-7 rounded-full object-cover mt-0.5"
+                          />
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline gap-1.5 flex-wrap">
+                            <span className="text-xs text-blue-400 font-medium">{c.username}</span>
+                            {c.gender === 'male' && <span className="text-[10px] text-blue-400">♂</span>}
+                            {c.gender === 'female' && <span className="text-[10px] text-pink-400">♀</span>}
+                            {c.gender === 'other' && <span className="text-[10px] text-gray-400">⚧</span>}
+                            {c.region && (
+                              <span className="text-gray-600 text-[11px] flex items-center gap-0.5">
+                                <span>📍</span>
+                                <span className="truncate max-w-[80px]">{c.region}</span>
+                              </span>
+                            )}
+                            <span className="text-xs text-gray-600">{formatTime(c.createdAt)}</span>
                           </div>
-                        }
-                        className="w-7 h-7 rounded-full object-cover mt-0.5"
-                      />
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-1.5 flex-wrap">
-                        <span className="text-xs text-blue-400 font-medium">{c.username}</span>
-                        {c.gender === 'male' && <span className="text-[10px] text-blue-400">♂</span>}
-                        {c.gender === 'female' && <span className="text-[10px] text-pink-400">♀</span>}
-                        {c.gender === 'other' && <span className="text-[10px] text-gray-400">⚧</span>}
-                        {c.region && (
-                          <span className="text-gray-600 text-[11px] flex items-center gap-0.5">
-                            <span>📍</span>
-                            <span className="truncate max-w-[80px]">{c.region}</span>
-                          </span>
-                        )}
-                        <span className="text-xs text-gray-600">{formatTime(c.createdAt)}</span>
+                          <p className="text-sm text-gray-300 mt-0.5">{c.content}</p>
+                          <button
+                            onClick={() => setReplyTo({ commentId: c.id, username: c.username, userId: c.userId })}
+                            className="text-[11px] text-gray-500 hover:text-blue-400 transition-colors mt-0.5 flex items-center gap-0.5"
+                          >
+                            <Reply className="w-3 h-3" />
+                            回复
+                          </button>
+                        </div>
                       </div>
-                      {c.bio && <p className="text-[11px] text-gray-500 italic mt-0.5 truncate">"{c.bio}"</p>}
-                      <p className="text-sm text-gray-300 mt-0.5">{c.content}</p>
+
+                      {/* 回复列表 */}
+                      {replies.length > 0 && (
+                        <div className="ml-9 mt-1 space-y-2 border-l-2 border-gray-700/50 pl-3">
+                          {replies.map((reply) => (
+                            <div key={reply.id} id={`comment-${reply.id}`} className="flex gap-2.5 transition-colors duration-300 rounded-lg p-1 -mx-1">
+                              <button onClick={() => onAvatarClick({ userId: reply.userId, username: reply.username, avatar: reply.avatar, bio: reply.bio, gender: reply.gender, region: reply.region })} className="flex-shrink-0">
+                                <SafeImg
+                                  src={resolveStaticUrl(reply.avatar || '')}
+                                  fallback={
+                                    <div className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                                      {reply.username[0]?.toUpperCase()}
+                                    </div>
+                                  }
+                                  className="w-6 h-6 rounded-full object-cover"
+                                />
+                              </button>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-baseline gap-1.5 flex-wrap">
+                                  <span className="text-xs text-blue-400 font-medium">{reply.username}</span>
+                                  {reply.replyToUsername && (
+                                    <span className="text-[11px] text-gray-500">
+                                      回复 <span className="text-blue-400/70">@{reply.replyToUsername}</span>
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-gray-600">{formatTime(reply.createdAt)}</span>
+                                </div>
+                                <p className="text-sm text-gray-300 mt-0.5">{reply.content}</p>
+                                <button
+                                  onClick={() => setReplyTo({ commentId: c.id, username: reply.username, userId: reply.userId })}
+                                  className="text-[11px] text-gray-500 hover:text-blue-400 transition-colors mt-0.5 flex items-center gap-0.5"
+                                >
+                                  <Reply className="w-3 h-3" />
+                                  回复
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           )}
 
           {/* 输入评论 */}
-          <div className="flex items-center gap-2 border-t border-gray-800 p-3">
-            <input
-              type="text"
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleComment() }}
-              className="flex-1 px-3 py-1.5 bg-[#0F172A] border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="写评论..."
-            />
-            <button
-              onClick={handleComment}
-              disabled={!commentText.trim()}
-              className="p-1.5 text-blue-400 hover:text-blue-300 disabled:text-gray-600 transition-colors"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+          <div className="border-t border-gray-800 p-3">
+            {replyTo && (
+              <div className="flex items-center gap-2 mb-2 text-xs text-gray-400">
+                <span>回复 @{replyTo.username}</span>
+                <button onClick={() => setReplyTo(null)} className="text-gray-500 hover:text-gray-300">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleComment() }}
+                className="flex-1 px-3 py-1.5 bg-[#0F172A] border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                placeholder={replyTo ? `回复 ${replyTo.username}...` : '写评论...'}
+              />
+              <button
+                onClick={handleComment}
+                disabled={!commentText.trim()}
+                className="p-1.5 text-blue-400 hover:text-blue-300 disabled:text-gray-600 transition-colors"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -229,6 +325,7 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick }: { pos
 
 export default function Moments() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const user = useAuthStore((s) => s.user)
   const posts = useMomentsStore((s) => s.posts)
   const setPosts = useMomentsStore((s) => s.setPosts)
@@ -240,6 +337,23 @@ export default function Moments() {
   const [selectedProfileUser, setSelectedProfileUser] = useState<AuthorUser | null>(null)
   const [friends, setFriends] = useState<Array<{ id: number }>>([])
   const [activeTab, setActiveTab] = useState<TabType>('square')
+  const [highlightPostId, setHighlightPostId] = useState<number | null>(null)
+  const [highlightCommentId, setHighlightCommentId] = useState<number | null>(null)
+
+  // 从 URL 中读取高亮参数（来自通知跳转）
+  useEffect(() => {
+    const postId = searchParams.get('highlightPost')
+    const commentId = searchParams.get('highlightComment')
+    if (postId) {
+      setHighlightPostId(parseInt(postId, 10))
+      setHighlightCommentId(commentId ? parseInt(commentId, 10) : null)
+      // 清除 URL 参数
+      const newParams = new URLSearchParams(searchParams)
+      newParams.delete('highlightPost')
+      newParams.delete('highlightComment')
+      setSearchParams(newParams, { replace: true })
+    }
+  }, [])
 
   const loadPosts = useCallback(async (tab?: string) => {
     setLoading(true)
@@ -404,6 +518,8 @@ export default function Moments() {
               onDelete={handleDelete}
               onEnlarge={(url) => setEnlargedImage(url)}
               onAvatarClick={handleAvatarClick}
+              highlightCommentId={highlightPostId === post.id ? highlightCommentId : null}
+              clearHighlight={() => { setHighlightPostId(null); setHighlightCommentId(null) }}
             />
           ))
         )}

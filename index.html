@@ -17,6 +17,11 @@
     <!-- Android WebView 安全区域适配 -->
     <style>
       :root { --safe-area-inset-top: env(safe-area-inset-top, 0px); --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px); --safe-area-inset-left: env(safe-area-inset-left, 0px); --safe-area-inset-right: env(safe-area-inset-right, 0px); }
+      @keyframes highlightPulse {
+        0%, 100% { background-color: transparent; }
+        50% { background-color: rgba(59, 130, 246, 0.2); }
+      }
+      .highlight-comment { animation: highlightPulse 0.5s ease-in-out 3; border-radius: 0.5rem; }
     </style>
     <script type="module">
       if (import.meta.hot?.on) {
