@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom"
-import * as Sentry from '@sentry/react'
 import { useAuthStore } from "@/store/authStore"
 import { getSocket } from "@/lib/socket"
 import { useChatStore } from "@/store/chatStore"
@@ -16,6 +15,7 @@ import Settings from "@/pages/Settings"
 import Moments from "@/pages/Moments"
 import CreatePost from "@/pages/CreatePost"
 import VipPlans from "@/pages/VipPlans"
+import Notifications from "@/pages/Notifications"
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
@@ -210,39 +210,22 @@ export default function App() {
   }, [init])
 
   return (
-    <Sentry.ErrorBoundary
-      fallback={({ error, resetError }) => (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
-          <div className="text-center max-w-md">
-            <div className="text-red-500 text-5xl mb-4">!</div>
-            <h1 className="text-xl font-bold text-gray-800 mb-2">页面出现错误</h1>
-            <p className="text-gray-500 text-sm mb-4">{(error as Error)?.message}</p>
-            <button
-              onClick={resetError}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              重试
-            </button>
-          </div>
-        </div>
-      )}
-    >
-      <Router>
-        <ServerOfflineBanner />
-        {isLoggedIn && <SocketListener />}
-        <Routes>
-          <Route path="/" element={isLoggedIn ? <Navigate to="/friends" replace /> : <Login />} />
-          <Route path="/register" element={isLoggedIn ? <Navigate to="/friends" replace /> : <Register />} />
-          <Route path="/friends" element={<ProtectedRoute><Friends /></ProtectedRoute>} />
-          <Route path="/chat/:friendId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-          <Route path="/group/:groupId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-          <Route path="/moments" element={<ProtectedRoute><Moments /></ProtectedRoute>} />
-          <Route path="/moments/create" element={<ProtectedRoute><CreatePost /></ProtectedRoute>} />
-          <Route path="/vip" element={<ProtectedRoute><VipPlans /></ProtectedRoute>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Router>
-    </Sentry.ErrorBoundary>
+    <Router>
+      <ServerOfflineBanner />
+      {isLoggedIn && <SocketListener />}
+      <Routes>
+        <Route path="/" element={isLoggedIn ? <Navigate to="/friends" replace /> : <Login />} />
+        <Route path="/register" element={isLoggedIn ? <Navigate to="/friends" replace /> : <Register />} />
+        <Route path="/friends" element={<ProtectedRoute><Friends /></ProtectedRoute>} />
+        <Route path="/chat/:friendId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+        <Route path="/group/:groupId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+        <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/moments" element={<ProtectedRoute><Moments /></ProtectedRoute>} />
+        <Route path="/moments/create" element={<ProtectedRoute><CreatePost /></ProtectedRoute>} />
+        <Route path="/vip" element={<ProtectedRoute><VipPlans /></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
   )
 }

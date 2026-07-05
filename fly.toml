@@ -1,0 +1,41 @@
+# ChatRoom - Fly.io 部署配置
+# Free tier: 3 shared VMs, 256MB RAM each, 3GB persistent storage
+
+app = "chatroom"
+primary_region = "nrt"  # 东京节点，国内访问延迟最低
+
+# 构建配置
+[build]
+  dockerfile = "Dockerfile"
+
+# 网络配置
+[[services]]
+  protocol = "tcp"
+  internal_port = 3001
+
+  # HTTP 服务
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+  
+  # HTTPS 自动配置
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  # WebSocket 支持
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 30
+
+# 数据持久化：SQLite 数据库存储在 volume 上
+[mounts]
+  source = "chatroom_data"
+  destination = "/app/data"
+
+# 内存限制
+[vm]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

@@ -49,20 +49,19 @@ export default defineConfig({
     minify: 'esbuild',
     cssMinify: true,
     sourcemap: false,
-    chunkSizeWarningLimit: 500,
-    // 代码分割：分离大依赖到独立 chunk，让浏览器缓存更好
+    chunkSizeWarningLimit: 300,
+    // 减少 CSS 文件大小
+    cssCodeSplit: true,
+    // 关闭 brotli 大小报告（减少构建时间）
+    reportCompressedSize: false,
     rollupOptions: {
       output: {
+        // 更细粒度的代码分割
         manualChunks: {
-          // React 核心：最稳定，最适合长期缓存
           'react-core': ['react', 'react-dom', 'react-router-dom'],
-          // 状态管理
           'state': ['zustand'],
-          // 图标库（体积较大，单独 chunk）
           'icons': ['lucide-react'],
-          // 工具类（clsx + tailwind-merge 小而稳）
           'utils': ['clsx', 'tailwind-merge'],
-          // Socket.IO
           'socket': ['socket.io-client'],
         },
       },

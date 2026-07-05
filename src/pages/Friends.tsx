@@ -6,7 +6,7 @@ import { useUnreadStore } from '@/store/unreadStore'
 import { api, resolveStaticUrl, type GroupInfo } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
 import SafeImg from '@/components/SafeImg'
-import { MessageCircle, LogOut, UserPlus, Search, Users, Camera, Trash2, X, Settings as SettingsIcon, Newspaper, Crown, Bell, Check, Bot, Plus, Shield } from 'lucide-react'
+import { MessageCircle, LogOut, UserPlus, Search, Users, Camera, Trash2, X, Settings as SettingsIcon, Newspaper, Crown, Bell, Check, Plus, Shield, Clock } from 'lucide-react'
 import NotificationBell from '@/components/NotificationBell'
 
 interface Friend {
@@ -32,6 +32,9 @@ export default function Friends() {
   const [deleteTarget, setDeleteTarget] = useState<Friend | null>(null)
   const [friendRequests, setFriendRequests] = useState<Array<{ id: number; senderId: number; senderUsername: string; senderAvatar: string }>>([])
   const [showRequests, setShowRequests] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [requestHistory, setRequestHistory] = useState<Array<{ id: number; senderId: number; receiverId: number; senderUsername: string; senderAvatar: string; receiverUsername: string; receiverAvatar: string; status: string; createdAt: string }>>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const longPressTimer = useRef<number | null>(null)
   const longPressTriggered = useRef(false)
   const [groups, setGroups] = useState<GroupInfo[]>([])
@@ -76,6 +79,18 @@ export default function Friends() {
       setFriendRequests(res.requests)
     } catch (err: any) {
       console.error('加载好友请求失败:', err)
+    }
+  }, [])
+
+  const loadRequestHistory = useCallback(async () => {
+    setLoadingHistory(true)
+    try {
+      const res = await api.getFriendRequestHistory()
+      setRequestHistory(res.requests)
+    } catch (err: any) {
+      console.error('加载好友申请历史失败:', err)
+    } finally {
+      setLoadingHistory(false)
     }
   }, [])
 
@@ -257,7 +272,7 @@ export default function Friends() {
   return (
     <div className="h-screen bg-[#0F172A] flex overflow-hidden">
       {/* Sidebar */}
-      <div className="w-80 bg-[#1E293B] flex flex-col border-r border-gray-800">
+      <div className="w-72 sm:w-80 bg-[#1E293B] border-r border-gray-800 flex-shrink-0 overflow-y-auto">
         {/* Header */}
         <div className="p-4 border-b border-gray-800">
           <div className="flex items-center justify-between mb-4">
@@ -359,7 +374,7 @@ export default function Friends() {
         </div>
 
         {/* Friends List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="overflow-y-auto">
           <div className="px-4 py-3">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 text-gray-400 text-sm">
@@ -385,6 +400,13 @@ export default function Friends() {
                   title="添加好友"
                 >
                   <UserPlus className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => { setShowHistory(true); loadRequestHistory() }}
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  title="好友申请历史"
+                >
+                  <Clock className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -659,18 +681,6 @@ export default function Friends() {
             <span>功能</span>
           </div>
           <button
-            onClick={() => navigate('/chat/ai')}
-            className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-gray-700/50 transition-colors text-left mb-1"
-          >
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-              <Bot className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <p className="text-white text-sm font-medium">屿岸 AI</p>
-              <p className="text-xs text-gray-500">智能对话助手</p>
-            </div>
-          </button>
-          <button
             onClick={() => navigate('/moments')}
             className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-gray-700/50 transition-colors text-left"
           >
@@ -879,6 +889,71 @@ export default function Friends() {
             >
               {creatingGroup ? '创建中...' : '创建群聊'}
             </button>
+          </div>
+        </div>
+      )}
+    {/* 好友申请历史弹窗 */}
+      {showHistory && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#1E293B] rounded-2xl p-6 w-full max-w-lg shadow-xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">好友申请历史</h3>
+              <button onClick={() => setShowHistory(false)}
+                className="p-1 text-gray-400 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {loadingHistory ? (
+                <div className="text-center text-gray-400 py-8">加载中...</div>
+              ) : requestHistory.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">暂无好友申请记录</div>
+              ) : (
+                <div className="space-y-2">
+                  {requestHistory.map((req) => {
+                    const isSender = req.senderId === user?.id
+                    const statusColors: Record<string, string> = {
+                      pending: 'text-yellow-400 bg-yellow-500/10',
+                      accepted: 'text-green-400 bg-green-500/10',
+                      rejected: 'text-red-400 bg-red-500/10',
+                    }
+                    const statusLabels: Record<string, string> = {
+                      pending: '待处理',
+                      accepted: '已同意',
+                      rejected: '已拒绝',
+                    }
+                    return (
+                      <div key={req.id} className="flex items-center gap-3 p-3 bg-[#0F172A] rounded-xl">
+                        <div className="flex-shrink-0">
+                          <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white text-sm font-semibold">
+                            {(isSender ? req.receiverUsername : req.senderUsername)?.[0]?.toUpperCase()}
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm truncate">
+                            {isSender ? (
+                              <>你向 <span className="text-blue-400">{req.receiverUsername}</span> 发送了好友申请</>
+                            ) : (
+                              <><span className="text-blue-400">{req.senderUsername}</span> 向你发送了好友申请</>
+                            )}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {new Date(req.createdAt).toLocaleString('zh-CN', {
+                              month: '2-digit', day: '2-digit',
+                              hour: '2-digit', minute: '2-digit',
+                            })}
+                          </p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[req.status] || 'text-gray-400 bg-gray-500/10'}`}>
+                          {statusLabels[req.status] || req.status}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

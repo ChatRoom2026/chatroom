@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/authStore'
 import { useMomentsStore } from '@/store/momentsStore'
 import { api, resolveStaticUrl, type Post, type Comment } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
-import { ArrowLeft, MessageCircle, Send, ImageIcon, Trash2, X, VideoIcon, Shield, Users, Globe, Reply } from 'lucide-react'
+import { ArrowLeft, MessageCircle, Send, ImageIcon, Trash2, X, VideoIcon, Shield, Users, Globe, Reply, ChevronDown, ChevronUp } from 'lucide-react'
 import UserProfileModal from '@/components/UserProfileModal'
 import SafeImg from '@/components/SafeImg'
 
@@ -26,6 +26,9 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
   const [commentText, setCommentText] = useState('')
   const [loadingComments, setLoadingComments] = useState(false)
   const [replyTo, setReplyTo] = useState<{ commentId: number; username: string; userId: number } | null>(null)
+  const [visibleCount, setVisibleCount] = useState(10)
+  const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set())
+  const [replyVisibleCounts, setReplyVisibleCounts] = useState<Record<number, number>>({})
 
   const loadComments = useCallback(async () => {
     setLoadingComments(true)
@@ -41,12 +44,19 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
     if (showComments) loadComments()
   }, [showComments, loadComments])
 
-  // 如果有关联高亮，自动展开评论
+  // 如果有关联高亮，自动展开评论并确保可见
   useEffect(() => {
     if (highlightCommentId) {
       setShowComments(true)
+      setVisibleCount(999)
+      // 如果高亮的是回复，展开其父评论
+      const target = comments.find((c) => c.id === highlightCommentId)
+      if (target?.parentId) {
+        setExpandedReplies((prev) => new Set(prev).add(target.parentId!))
+        setReplyVisibleCounts((prev) => ({ ...prev, [target.parentId!]: 999 }))
+      }
     }
-  }, [highlightCommentId])
+  }, [highlightCommentId, comments])
 
   // 高亮评论：滚动到该评论位置，1.5秒后恢复
   useEffect(() => {
@@ -82,6 +92,16 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
       if (socket) {
         socket.emit('new_comment', { comment: res.comment, postId: post.id })
       }
+    } catch (err: any) {
+      alert(err.message)
+    }
+  }
+
+  const handleDeleteComment = async (commentId: number) => {
+    if (!confirm('确定删除这条评论吗？')) return
+    try {
+      await api.deleteComment(post.id, commentId)
+      setComments((prev) => prev.filter((c) => c.id !== commentId && c.parentId !== commentId))
     } catch (err: any) {
       alert(err.message)
     }
@@ -198,93 +218,187 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
           {loadingComments ? (
             <div className="p-4 text-center text-gray-500 text-sm">加载中...</div>
           ) : (
-            <div className="max-h-80 overflow-y-auto space-y-2 p-4">
+            <div className="max-h-80 overflow-y-auto p-4">
               {comments.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center">暂无评论</p>
               ) : (
-                topLevelComments.map((c) => {
-                  const replies = getReplies(c.id)
-                  return (
-                    <div key={c.id}>
-                      <div id={`comment-${c.id}`} className="flex gap-2.5 group transition-colors duration-300 rounded-lg p-1 -mx-1">
-                        <button onClick={() => onAvatarClick({ userId: c.userId, username: c.username, avatar: c.avatar, bio: c.bio, gender: c.gender, region: c.region })} className="flex-shrink-0">
-                          <SafeImg
-                            src={resolveStaticUrl(c.avatar || '')}
-                            fallback={
-                              <div className="w-7 h-7 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-semibold mt-0.5">
-                                {c.username[0]?.toUpperCase()}
+                <>
+                  <div className="space-y-2">
+                    {topLevelComments.slice(0, visibleCount).map((c) => {
+                      const replies = getReplies(c.id)
+                      const isExpanded = expandedReplies.has(c.id)
+                      const replyMax = replyVisibleCounts[c.id] || 10
+                      const visibleReplies = replies.slice(0, replyMax)
+                      const hasMoreReplies = replies.length > replyMax
+                      return (
+                        <div key={c.id}>
+                          <div id={`comment-${c.id}`} className="flex gap-2.5 group transition-colors duration-300 rounded-lg p-1 -mx-1">
+                            <button onClick={() => onAvatarClick({ userId: c.userId, username: c.username, avatar: c.avatar, bio: c.bio, gender: c.gender, region: c.region })} className="flex-shrink-0">
+                              <SafeImg
+                                src={resolveStaticUrl(c.avatar || '')}
+                                fallback={
+                                  <div className="w-7 h-7 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-semibold mt-0.5">
+                                    {c.username[0]?.toUpperCase()}
+                                  </div>
+                                }
+                                className="w-7 h-7 rounded-full object-cover mt-0.5"
+                              />
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline gap-1.5 flex-wrap">
+                                <span className="text-xs text-blue-400 font-medium">{c.username}</span>
+                                {c.gender === 'male' && <span className="text-[10px] text-blue-400">♂</span>}
+                                {c.gender === 'female' && <span className="text-[10px] text-pink-400">♀</span>}
+                                {c.gender === 'other' && <span className="text-[10px] text-gray-400">⚧</span>}
+                                {c.region && (
+                                  <span className="text-gray-600 text-[11px] flex items-center gap-0.5">
+                                    <span>📍</span>
+                                    <span className="truncate max-w-[80px]">{c.region}</span>
+                                  </span>
+                                )}
+                                <span className="text-xs text-gray-600">{formatTime(c.createdAt)}</span>
                               </div>
-                            }
-                            className="w-7 h-7 rounded-full object-cover mt-0.5"
-                          />
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline gap-1.5 flex-wrap">
-                            <span className="text-xs text-blue-400 font-medium">{c.username}</span>
-                            {c.gender === 'male' && <span className="text-[10px] text-blue-400">♂</span>}
-                            {c.gender === 'female' && <span className="text-[10px] text-pink-400">♀</span>}
-                            {c.gender === 'other' && <span className="text-[10px] text-gray-400">⚧</span>}
-                            {c.region && (
-                              <span className="text-gray-600 text-[11px] flex items-center gap-0.5">
-                                <span>📍</span>
-                                <span className="truncate max-w-[80px]">{c.region}</span>
-                              </span>
-                            )}
-                            <span className="text-xs text-gray-600">{formatTime(c.createdAt)}</span>
-                          </div>
-                          <p className="text-sm text-gray-300 mt-0.5">{c.content}</p>
-                          <button
-                            onClick={() => setReplyTo({ commentId: c.id, username: c.username, userId: c.userId })}
-                            className="text-[11px] text-gray-500 hover:text-blue-400 transition-colors mt-0.5 flex items-center gap-0.5"
-                          >
-                            <Reply className="w-3 h-3" />
-                            回复
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 回复列表 */}
-                      {replies.length > 0 && (
-                        <div className="ml-9 mt-1 space-y-2 border-l-2 border-gray-700/50 pl-3">
-                          {replies.map((reply) => (
-                            <div key={reply.id} id={`comment-${reply.id}`} className="flex gap-2.5 transition-colors duration-300 rounded-lg p-1 -mx-1">
-                              <button onClick={() => onAvatarClick({ userId: reply.userId, username: reply.username, avatar: reply.avatar, bio: reply.bio, gender: reply.gender, region: reply.region })} className="flex-shrink-0">
-                                <SafeImg
-                                  src={resolveStaticUrl(reply.avatar || '')}
-                                  fallback={
-                                    <div className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-white text-[10px] font-semibold">
-                                      {reply.username[0]?.toUpperCase()}
-                                    </div>
-                                  }
-                                  className="w-6 h-6 rounded-full object-cover"
-                                />
-                              </button>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-baseline gap-1.5 flex-wrap">
-                                  <span className="text-xs text-blue-400 font-medium">{reply.username}</span>
-                                  {reply.replyToUsername && (
-                                    <span className="text-[11px] text-gray-500">
-                                      回复 <span className="text-blue-400/70">@{reply.replyToUsername}</span>
-                                    </span>
-                                  )}
-                                  <span className="text-[10px] text-gray-600">{formatTime(reply.createdAt)}</span>
-                                </div>
-                                <p className="text-sm text-gray-300 mt-0.5">{reply.content}</p>
+                              <p className="text-sm text-gray-300 mt-0.5">{c.content}</p>
+                              <div className="flex items-center gap-2">
                                 <button
-                                  onClick={() => setReplyTo({ commentId: c.id, username: reply.username, userId: reply.userId })}
+                                  onClick={() => setReplyTo({ commentId: c.id, username: c.username, userId: c.userId })}
                                   className="text-[11px] text-gray-500 hover:text-blue-400 transition-colors mt-0.5 flex items-center gap-0.5"
                                 >
                                   <Reply className="w-3 h-3" />
                                   回复
                                 </button>
+                                {user?.id === c.userId && (
+                                  <button
+                                    onClick={() => handleDeleteComment(c.id)}
+                                    className="text-[11px] text-gray-500 hover:text-red-400 transition-colors mt-0.5 flex items-center gap-0.5"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    删除
+                                  </button>
+                                )}
                               </div>
                             </div>
-                          ))}
+                          </div>
+
+                          {/* 回复折叠/展开按钮 */}
+                          {replies.length > 0 && !isExpanded && (
+                            <button
+                              onClick={() => setExpandedReplies((prev) => new Set(prev).add(c.id))}
+                              className="ml-9 mt-1 text-[11px] text-gray-500 hover:text-blue-400 transition-colors flex items-center gap-1"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                              查看回复 ({replies.length})
+                            </button>
+                          )}
+
+                          {/* 回复列表 */}
+                          {isExpanded && replies.length > 0 && (
+                            <div className="ml-9 mt-1 border-l-2 border-gray-700/50 pl-3">
+                              <div className="space-y-2">
+                                {visibleReplies.map((reply) => (
+                                  <div key={reply.id} id={`comment-${reply.id}`} className="flex gap-2.5 transition-colors duration-300 rounded-lg p-1 -mx-1">
+                                    <button onClick={() => onAvatarClick({ userId: reply.userId, username: reply.username, avatar: reply.avatar, bio: reply.bio, gender: reply.gender, region: reply.region })} className="flex-shrink-0">
+                                      <SafeImg
+                                        src={resolveStaticUrl(reply.avatar || '')}
+                                        fallback={
+                                          <div className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                                            {reply.username[0]?.toUpperCase()}
+                                          </div>
+                                        }
+                                        className="w-6 h-6 rounded-full object-cover"
+                                      />
+                                    </button>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-baseline gap-1.5 flex-wrap">
+                                        <span className="text-xs text-blue-400 font-medium">{reply.username}</span>
+                                        {reply.replyToUsername && (
+                                          <span className="text-[11px] text-gray-500">
+                                            回复 <span className="text-blue-400/70">@{reply.replyToUsername}</span>
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-gray-600">{formatTime(reply.createdAt)}</span>
+                                      </div>
+                                      <p className="text-sm text-gray-300 mt-0.5">{reply.content}</p>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => setReplyTo({ commentId: c.id, username: reply.username, userId: reply.userId })}
+                                          className="text-[11px] text-gray-500 hover:text-blue-400 transition-colors mt-0.5 flex items-center gap-0.5"
+                                        >
+                                          <Reply className="w-3 h-3" />
+                                          回复
+                                        </button>
+                                        {user?.id === reply.userId && (
+                                          <button
+                                            onClick={() => handleDeleteComment(reply.id)}
+                                            className="text-[11px] text-gray-500 hover:text-red-400 transition-colors mt-0.5 flex items-center gap-0.5"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                            删除
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                {hasMoreReplies && (
+                                  <button
+                                    onClick={() => setReplyVisibleCounts((prev) => ({ ...prev, [c.id]: replyMax + 10 }))}
+                                    className="text-[11px] text-gray-500 hover:text-blue-400 transition-colors flex items-center gap-1"
+                                  >
+                                    <ChevronDown className="w-3 h-3" />
+                                    展开更多回复
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    setExpandedReplies((prev) => {
+                                      const next = new Set(prev)
+                                      next.delete(c.id)
+                                      return next
+                                    })
+                                    setReplyVisibleCounts((prev) => {
+                                      const next = { ...prev }
+                                      delete next[c.id]
+                                      return next
+                                    })
+                                  }}
+                                  className="text-[11px] text-gray-500 hover:text-gray-400 transition-colors flex items-center gap-1"
+                                >
+                                  <ChevronUp className="w-3 h-3" />
+                                  收起回复
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  )
-                })
+                      )
+                    })}
+                  </div>
+
+                  {/* 展开更多评论 */}
+                  {topLevelComments.length > visibleCount && (
+                    <button
+                      onClick={() => setVisibleCount((prev) => prev + 10)}
+                      className="w-full mt-2 py-1.5 text-xs text-gray-400 hover:text-blue-400 hover:bg-gray-700/30 rounded-lg transition-colors flex items-center justify-center gap-1"
+                    >
+                      <ChevronDown className="w-3 h-3" />
+                      展开更多评论 ({topLevelComments.length - visibleCount} 条)
+                    </button>
+                  )}
+
+                  {/* 收起评论 */}
+                  {visibleCount > 10 && (
+                    <button
+                      onClick={() => setVisibleCount(10)}
+                      className="w-full mt-1 py-1.5 text-xs text-gray-400 hover:text-gray-300 hover:bg-gray-700/30 rounded-lg transition-colors flex items-center justify-center gap-1"
+                    >
+                      <ChevronUp className="w-3 h-3" />
+                      收起
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -316,6 +430,13 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
                 <Send className="w-4 h-4" />
               </button>
             </div>
+            <button
+              onClick={() => setShowComments(false)}
+              className="w-full mt-2 py-1.5 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-700/30 rounded-lg transition-colors flex items-center justify-center gap-1"
+            >
+              <ChevronUp className="w-3 h-3" />
+              收起评论
+            </button>
           </div>
         </div>
       )}

@@ -277,6 +277,11 @@ export const api = {
     return request<{ success: boolean; requests: Array<{ id: number; senderId: number; senderUsername: string; senderAvatar: string; status: string; createdAt: string }> }>('/friends/requests')
   },
 
+  // 获取好友申请历史
+  getFriendRequestHistory() {
+    return request<{ success: boolean; requests: Array<{ id: number; senderId: number; receiverId: number; senderUsername: string; senderAvatar: string; receiverUsername: string; receiverAvatar: string; status: string; createdAt: string }> }>('/friends/requests/history')
+  },
+
   // 处理好友请求（同意/拒绝）
   respondFriendRequest(requestId: number, action: 'accept' | 'reject') {
     return request<{ success: boolean; message: string }>('/friends/respond', {
@@ -377,6 +382,12 @@ export const api = {
     })
   },
 
+  deleteComment(postId: number, commentId: number) {
+    return request<{ success: boolean }>(`/posts/${postId}/comments/${commentId}`, {
+      method: 'DELETE',
+    })
+  },
+
   // 通知
   getNotifications() {
     return request<{ success: boolean; notifications: Array<Notification> }>('/posts/notifications/list')
@@ -418,14 +429,6 @@ export const api = {
     return request<{ success: boolean; message: string; vip: number; expiresAt: string }>('/vip/confirm', {
       method: 'POST',
       body: JSON.stringify({ outTradeNo }),
-    })
-  },
-
-  // AI 聊天
-  sendAiMessage(message: string) {
-    return request<{ success: boolean; reply: string }>('/ai/chat', {
-      method: 'POST',
-      body: JSON.stringify({ message }),
     })
   },
 

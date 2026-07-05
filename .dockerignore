@@ -1,0 +1,10 @@
+node_modules
+dist
+data
+uploads
+.git
+.env
+*.keystore
+.jwt_secret
+android
+.capacitor

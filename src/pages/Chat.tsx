@@ -18,7 +18,6 @@ export default function Chat() {
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
-  const [aiMessages, setAiMessages] = useState<Array<{ id: string; role: 'user' | 'ai'; content: string; timestamp: string }>>([])
   const [groupInfo, setGroupInfo] = useState<GroupInfo | null>(null)
   const [groupMembers, setGroupMembers] = useState<Array<{ id: number; username: string; avatar: string; role: string }>>([])
   const [showAddMemberModal, setShowAddMemberModal] = useState(false)
@@ -45,12 +44,11 @@ export default function Chat() {
   const loadGroupMessages = useChatStore((s) => s.loadGroupMessages)
   const addGroupMessage = useChatStore((s) => s.addGroupMessage)
 
-  const isAiMode = friendId === 'ai'
   const isGroupMode = !!groupId
-  const fid = isAiMode ? -999 : Number(friendId)
+  const fid = Number(friendId)
   const currentGroupMessages = isGroupMode ? (groupMessages[Number(groupId)] || []) : []
-  const friendMessages = isAiMode ? aiMessages : (messages[fid] || [])
-  const isTyping = isAiMode ? false : (typingUsers[fid] || false)
+  const friendMessages = messages[fid] || []
+  const isTyping = typingUsers[fid] || false
 
   // 加载好友信息、群组信息和聊天记录
   useEffect(() => {
@@ -87,18 +85,7 @@ export default function Chat() {
       return
     }
 
-    if (!fid && !isAiMode) return
-
-    // AI 模式
-    if (isAiMode) {
-      setFriend({
-        id: -999,
-        username: '屿岸 AI',
-        avatar: '',
-      })
-      setLoading(false)
-      return
-    }
+    if (!fid) return
 
     // 文件传输助手（自己和自己聊天）
     if (user && fid === user.id) {
@@ -122,7 +109,7 @@ export default function Chat() {
     // 加载聊天记录
     setLoading(true)
     loadMessages(fid).finally(() => setLoading(false))
-  }, [fid, loadMessages, user, isAiMode, isGroupMode, groupId, loadGroupMessages])
+  }, [fid, loadMessages, user, isGroupMode, groupId, loadGroupMessages])
 
   // 通知后端当前正在查看的会话 + 清除未读
   useEffect(() => {
@@ -133,7 +120,7 @@ export default function Chat() {
       const gid = Number(groupId)
       socket.emit('active_session', { targetType: 'group', targetId: gid })
       useUnreadStore.getState().clearUnread('group', gid)
-    } else if (fid && !isAiMode) {
+    } else if (fid) {
       socket.emit('active_session', { targetType: 'friend', targetId: fid })
       useUnreadStore.getState().clearUnread('friend', fid)
     } else {
@@ -143,7 +130,7 @@ export default function Chat() {
     return () => {
       socket.emit('active_session', null)
     }
-  }, [fid, groupId, isGroupMode, isAiMode, user])
+  }, [fid, groupId, isGroupMode, user])
 
   // Socket 监听
   useEffect(() => {
@@ -207,24 +194,6 @@ export default function Chat() {
       return
     }
 
-    if (isAiMode) {
-      // AI 模式：调用 DeepSeek API
-      const userMsg = { id: `u_${Date.now()}`, role: 'user' as const, content, timestamp: new Date().toISOString() }
-      setAiMessages((prev) => [...prev, userMsg])
-
-      try {
-        const res = await api.sendAiMessage(content)
-        const aiMsg = { id: `ai_${Date.now()}`, role: 'ai' as const, content: res.reply, timestamp: new Date().toISOString() }
-        setAiMessages((prev) => [...prev, aiMsg])
-      } catch (err: any) {
-        const errMsg = { id: `err_${Date.now()}`, role: 'ai' as const, content: err.message || '请求失败，请稍后重试', timestamp: new Date().toISOString() }
-        setAiMessages((prev) => [...prev, errMsg])
-      }
-
-      setSending(false)
-      return
-    }
-
     const socket = getSocket()
     if (!socket) {
       setSending(false)
@@ -238,7 +207,7 @@ export default function Chat() {
     })
 
     setSending(false)
-  }, [text, sending, fid, isAiMode, isGroupMode, groupId])
+  }, [text, sending, fid, isGroupMode, groupId])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -251,7 +220,7 @@ export default function Chat() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setText(e.target.value)
 
-    if (isAiMode || isGroupMode) return // AI 模式和群聊模式不发送 typing 事件
+    if (isGroupMode) return // 群聊模式不发送 typing 事件
 
     const socket = getSocket()
     if (!socket || !fid) return
@@ -480,7 +449,7 @@ export default function Chat() {
             </>
           )}
         </div>
-        {!isGroupMode && !isAiMode && friend && friend.id !== user?.id && (
+        {!isGroupMode && friend && friend.id !== user?.id && (
           <button
             onClick={() => setShowFriendInfo(true)}
             className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
@@ -629,33 +598,6 @@ export default function Chat() {
               )
             })
           )
-        ) : isAiMode ? (
-          <div className="space-y-4">
-            {friendMessages.length === 0 ? (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-gray-500 text-sm">开始和屿岸 AI 对话吧</p>
-              </div>
-            ) : (
-              (friendMessages as Array<{ id: string; role: string; content: string; timestamp: string }>).map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[75%] ${msg.role === 'user' ? 'order-1' : 'order-1'}`}>
-                    <div
-                      className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                        msg.role === 'user'
-                          ? 'bg-blue-600 text-white rounded-br-md'
-                          : 'bg-[#1E293B] text-gray-200 rounded-bl-md'
-                      }`}
-                    >
-                      {msg.content}
-                    </div>
-                    <p className={`text-xs text-gray-600 mt-1 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                      {formatTime(msg.timestamp)}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         ) : friendMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-gray-500 text-sm">开始聊天吧</p>
@@ -733,43 +675,39 @@ export default function Chat() {
 
       {/* Input */}
       <div className="bg-[#1E293B] border-t border-gray-800 px-4 py-3">
-        {friend?.active === 0 && !isAiMode && !isGroupMode ? (
+        {friend?.active === 0 && !isGroupMode ? (
           <div className="flex items-center gap-2 justify-center py-2">
             <Ban className="w-4 h-4 text-red-400/60" />
             <p className="text-sm text-red-400/60">该用户已注销，无法发送消息</p>
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            {!isAiMode && (
-              <>
-                <button
-                  onClick={() => imageInputRef.current?.click()}
-                  className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-                  title="发送图片"
-                >
-                  <Image className="w-5 h-5" />
-                </button>
-                <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+            <button
+              onClick={() => imageInputRef.current?.click()}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="发送图片"
+            >
+              <Image className="w-5 h-5" />
+            </button>
+            <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
 
-                <button
-                  onClick={() => videoInputRef.current?.click()}
-                  className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-                  title="发送视频"
-                >
-                  <VideoIcon className="w-5 h-5" />
-                </button>
-                <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
+            <button
+              onClick={() => videoInputRef.current?.click()}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="发送视频"
+            >
+              <VideoIcon className="w-5 h-5" />
+            </button>
+            <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
 
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-                  title="发送文件"
-                >
-                  <Paperclip className="w-5 h-5" />
-                </button>
-                <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z,.txt,.csv,.ppt,.pptx,.mp3,.json,.xml" onChange={handleFileUpload} className="hidden" />
-              </>
-            )}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="发送文件"
+            >
+              <Paperclip className="w-5 h-5" />
+            </button>
+            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z,.txt,.csv,.ppt,.pptx,.mp3,.json,.xml" onChange={handleFileUpload} className="hidden" />
 
             <input
               type="text"
@@ -777,7 +715,7 @@ export default function Chat() {
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               className="flex-1 px-4 py-2.5 bg-[#0F172A] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder={isAiMode ? '向屿岸 AI 提问...' : isGroupMode ? '发送群消息...' : '输入消息...'}
+              placeholder={isGroupMode ? '发送群消息...' : '输入消息...'}
               disabled={sending}
             />
 
