@@ -1,0 +1,46 @@
+name: 打包手机 APK
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 设置 Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: 设置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装依赖
+        run: npm install
+
+      - name: 构建前端
+        run: npx vite build
+
+      - name: 同步 Android 项目
+        run: npx cap sync android
+
+      - name: 打包 APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatRoom-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
