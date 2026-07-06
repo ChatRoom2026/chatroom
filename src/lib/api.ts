@@ -10,6 +10,10 @@ import { isAndroid, isNativeApp } from './platform'
 // 浏览器开发：使用 vite proxy 转发 /api
 function detectApiBase(): string {
   if (isNativeApp() && isAndroid()) {
+    // 优先使用构建时配置的服务器地址（VITE_API_BASE）
+    if (import.meta.env.VITE_API_BASE) {
+      return import.meta.env.VITE_API_BASE
+    }
     const stored = localStorage.getItem('api_base_url')
     if (stored) return stored
     return 'http://10.0.2.2:3001/api'

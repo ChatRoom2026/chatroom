@@ -52,7 +52,22 @@ if "%ANDROID_HOME%"=="" (
 )
 
 echo.
-echo [1/3] 安装依赖...
+echo [1/4] 读取服务器地址...
+:: 从 .env.apk 读取服务器地址
+if exist .env.apk (
+    for /f "tokens=2 delims==" %%a in ('findstr /c:"VITE_API_BASE" .env.apk') do (
+        set APK_SERVER=%%a
+    )
+    echo   服务器地址: !APK_SERVER!
+    :: 复制 .env.apk 到 .env（Vite 构建时读取）
+    copy /y .env.apk .env >nul
+) else (
+    echo   [提示] 未找到 .env.apk，使用默认地址
+    echo   如果需要自定义服务器地址，请编辑 .env.apk 文件
+)
+
+echo.
+echo [2/4] 安装依赖...
 call npm install
 if %errorlevel% neq 0 (
     echo [错误] 依赖安装失败
@@ -61,7 +76,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [2/3] 构建前端...
+echo [3/4] 构建前端...
 call npx vite build
 if %errorlevel% neq 0 (
     echo [错误] 前端构建失败
@@ -70,7 +85,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [3/3] 打包 APK...
+echo [4/4] 打包 APK...
 call npx cap sync android
 if %errorlevel% neq 0 (
     echo [错误] Capacitor 同步失败
@@ -99,11 +114,8 @@ echo   APK 文件位置:
 echo   android\app\build\outputs\apk\debug\app-debug.apk
 echo.
 echo   把这个 APK 文件传到手机上安装即可
+echo   服务器地址已内置，安装后直接就能用！
 echo ========================================
-echo.
-echo 手机安装后，打开软件 → 设置 → 服务器地址
-echo 输入你电脑的 IP:3001，例如:
-echo   http://192.168.1.100:3001
 echo.
 
 pause
