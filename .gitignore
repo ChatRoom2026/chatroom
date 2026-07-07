@@ -51,4 +51,4 @@ uploads/
 release/
 
 # iOS build artifacts
-ios/
+ios/node_modules

@@ -1,24 +1,13 @@
 /**
- * Redis 在线状态存储管理器（一核服务器深度优化版）
+ * Redis 在线状态存储管理器（0.5GB 内存优化版）
  *
- * 数据结构（稳定可靠且高性能：
- *
- *   chatroom:online:{userId}   = socketId   (TTL=30s)     ← 用户在线 key，过期即视为下线（通过 keyspace notifications 自动广播下线
- *   chatroom:sessions:{userId} = sessionKey (TTL=10min)  ← 用户当前查看的会话（用于判断是否需要增加未读计数）
- *   chatroom:offline_pending:{userId} = socketId (TTL=20s) ← 断网宽限期内的用户
- *
- * 关键特性：
- *  ① Redis keyspace 通知：监听 __keyevent@0__:expired / chatroom:online:*，key 过期即视为下线（解决 setTimeout 进程重启丢失问题
- *  ② getAllOnlineUserIds 使用 SCAN 避免 SMEMBERS 一次拉取所有大集合（大集合场景优化）
- *  ③ fallback 后每 30 秒尝试重新连接 Redis，恢复后自动同步
- *  ④ 内存模式设置上限（最多 5000 个 user），定期清理过期
- *  ⑤ 使用 Lua 脚本优化批量 SETEX+SADD 合并减少 RTT
- *  ⑥ 优雅退出时清理本进程连接的用户 socket
+ * 默认使用内存模式（零外部依赖），仅当 REDIS_URL 环境变量显式设置时才连接 Redis。
+ * 内存模式内存开销 < 5MB（5000 用户上限）。
  */
 import Redis from 'ioredis'
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379'
-const ONLINE_TTL = 30          // 在线状态过期
+const REDIS_URL = process.env.REDIS_URL || ''
+const ONLINE_TTL = 30
 const OFFLINE_GRACE = 20    // 宽限期：掉线后 20s 内重连不算下线
 const MAX_MEM_USERS = 5000       // 内存模式在线用户上限（防止内存泄漏）
 const RECONNECT_INTERVAL = 30_000  // fallback 后每 30 秒尝试重连 Redis
@@ -51,6 +40,7 @@ function createClient(opts: any = {}): any {
 
 function redis(): Redis | null {
   if (fallback) return null
+  if (!REDIS_URL) return null  // 未配置 Redis，直接使用内存模式
   if (client) return client
   try {
     client = createClient()

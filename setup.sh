@@ -12,7 +12,7 @@ npm install
 echo ""
 echo "✅ 依赖安装完成"
 echo "🚀 启动后端..."
-node --import tsx api/server.ts &
+node --env-file=.env --import tsx api/server.ts &
 sleep 2
 
 echo "🚀 启动前端..."

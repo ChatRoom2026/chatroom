@@ -202,6 +202,30 @@ router.get('/requests', authMiddleware, (req: Request, res: Response): void => {
 })
 
 /**
+ * 获取好友申请历史（全部状态：发送/收到/已同意/已拒绝）
+ */
+router.get('/requests/history', authMiddleware, (req: Request, res: Response): void => {
+  try {
+    const userId = (req as any).user.id
+    const requests = stmtCache
+      .get(`SELECT fr.id, fr.senderId, fr.receiverId, fr.status, fr.createdAt,
+                 su.username AS senderUsername, su.avatar AS senderAvatar,
+                 ru.username AS receiverUsername, ru.avatar AS receiverAvatar
+           FROM friend_requests fr
+           LEFT JOIN users su ON su.id = fr.senderId
+           LEFT JOIN users ru ON ru.id = fr.receiverId
+           WHERE fr.senderId = ? OR fr.receiverId = ?
+           ORDER BY fr.createdAt DESC
+           LIMIT 100`)
+      .all(userId, userId) as any[]
+    res.json({ success: true, requests })
+  } catch (error: any) {
+    console.error('[friends-requests-history]', error?.message || error)
+    res.status(500).json({ success: false, error: '服务器内部错误' })
+  }
+})
+
+/**
  * 删除好友
  */
 router.delete('/:friendId', authMiddleware, (req: Request, res: Response): void => {

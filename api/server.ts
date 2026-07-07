@@ -1,20 +1,14 @@
 /**
- * 服务端入口 —— 500 用户极限优化版
+ * 服务端入口 —— 0.5GB 内存极限优化版
  *
- * 启动命令（1GB 内存服务器）:
- *   node \
- *     --max-old-space-size=384 \         # V8 heap 384MB，留 640MB 给 OS + 连接
- *     --optimize-for-size \              # 优先内存而非速度
- *     --max-semi-space-size=2 \          # 新生代 2MB，减少 GC 停顿
- *     --initial-old-space-size=128 \     # 老生代初始 128MB
- *     api/server.ts
+ * 启动命令:
+ *   node --max-old-space-size=128 --optimize-for-size --max-semi-space-size=1 --initial-old-space-size=64 --import tsx api/server.ts
  *
- * 优化：
- *   - SQLite WAL2 + 64MB cache + 128MB mmap（1GB 内存下平衡）
- *   - Socket.IO 500 连接：心跳 25s + 仅 >2KB 压缩 + 5MB 消息上限
- *   - 自动清理：图片 30 天 / 视频 15 天 / 聊天文字 60 天
- *   - 批量写入缓冲 100ms，减少事务锁竞争
- *   - 优雅退出 + 未捕获异常兜底
+ * 内存预算（总计 < 200MB）:
+ *   - V8 heap: 128MB
+ *   - SQLite: 16MB cache + 32MB mmap = 48MB
+ *   - OS + 其他: ~300MB 预留
+ *   - 适合 512MB 内存 / 1 核 CPU（¥10-15/月）
  */
 import http from 'http'
 import fs from 'fs'
@@ -43,9 +37,6 @@ async function start(): Promise<void> {
 
   // 启动时检查关键环境变量
   const warnings: string[] = []
-  if (!process.env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY.trim() === '') {
-    warnings.push('⚠  DEEPSEEK_API_KEY 未设置：AI 聊天功能将不可用')
-  }
   if (!process.env.JWT_SECRET) {
     warnings.push('⚠  JWT_SECRET 未设置：将自动生成随机密钥（每次重启会变化，用户需重新登录）')
   }
@@ -72,7 +63,7 @@ process.on('unhandledRejection', (reason: any) => {
 })
 
 // ============ 定时清理已注销账号 ============
-const CLEANUP_INTERVAL = 60 * 60 * 1000  // 1 小时
+const CLEANUP_INTERVAL = 2 * 60 * 60 * 1000  // 2 小时
 const CLEANUP_DELAY = 10 * 1000
 
 function cleanupDeactivatedUsers(): void {

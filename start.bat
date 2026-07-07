@@ -54,6 +54,6 @@ for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do (
 
 echo.
 set NODE_ENV=production
-node --max-old-space-size=128 --optimize-for-size --import tsx api/server.ts
+node --env-file=.env --max-old-space-size=128 --optimize-for-size --max-semi-space-size=1 --initial-old-space-size=64 --import tsx api/server.ts
 
 pause

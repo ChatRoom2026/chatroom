@@ -28,9 +28,9 @@ import {
 // =============== 优化 1：反向索引（userId -> socketId[]） ===============
 const localSockets = new Map<string, { socket: any; userId: number; username: string }>()
 const userToSocketIds = new Map<number, Set<string>>()
-// 消息频率限制（每用户每秒最多 5 条）
+// 消息频率限制（每用户每秒最多 3 条，0.5GB 下降低 CPU 压力）
 const messageRateLimit = new Map<number, { count: number; reset: number }>()
-const MESSAGE_RATE_MAX = 5
+const MESSAGE_RATE_MAX = 3
 const MESSAGE_RATE_WINDOW = 1000
 
 function checkRateLimit(userId: number): boolean {
@@ -96,7 +96,7 @@ interface QueuedUnread {
 
 const messageQueue: QueuedMessage[] = []
 const unreadQueue: QueuedUnread[] = []
-const MESSAGE_FLUSH_INTERVAL = 100
+const MESSAGE_FLUSH_INTERVAL = 200
 const MESSAGE_BATCH_LIMIT = 500
 
 let io: SocketIOServer
@@ -191,20 +191,19 @@ export function initSocket(server: HTTPServer): SocketIOServer {
   io = new SocketIOServer(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
     transports: ['websocket', 'polling'],
-    // 500 连接：心跳间隔 25s，超时 15s
-    pingInterval: 25000,
-    pingTimeout: 15000,
-    // 压缩：仅 >2KB 消息启用，level 1 最快
-    perMessageDeflate: { threshold: 2048, zlibDeflateOptions: { level: 1 } },
-    // 最大消息体 5MB（500 用户下降低内存峰值）
-    maxHttpBufferSize: 5 * 1024 * 1024,
+    // 100 连接：心跳间隔 45s，超时 20s（0.5GB 内存下减少心跳开销）
+    pingInterval: 45000,
+    pingTimeout: 20000,
+    // 压缩：仅 >4KB 消息启用，level 1 最快
+    perMessageDeflate: { threshold: 4096, zlibDeflateOptions: { level: 1 } },
+    // 最大消息体 2MB（降低内存峰值）
+    maxHttpBufferSize: 2 * 1024 * 1024,
     // 连接超时 5s
     connectTimeout: 5000,
     // 禁用 cookie 解析（减少开销）
     cookie: false,
     // 不提供客户端 JS 文件
     serveClient: false,
-    // 减少每连接初始 buffer
     allowUpgrades: true,
     upgradeTimeout: 5000,
   })

@@ -1,17 +1,15 @@
 /**
- * SQLite 数据库初始化 —— 单核服务器极限优化版
+ * SQLite 数据库初始化 —— 0.5GB 内存极限优化版
  *
- * 性能关键点：
- *  1) WAL2 模式：写入并发更高，checkpoint 开销更小（SQLite 3.37+）
- *  2) synchronous = NORMAL：写性能提升 3-5 倍，聊天场景断电可接受
- *  3) mmap_size = 512MB：热数据通过 OS page cache 命中，读延迟 ~0.1ms
- *  4) cache_size = -262144（256MB）：SQLite 内部 page cache 更大，减少磁盘 IO
- *  5) 覆盖索引（covering index）：消息/好友/评论等热点查询走索引不回表
- *  6) temp_store = MEMORY：排序/分组全在内存，零磁盘开销
- *  7) busy_timeout 3s：避免并发写入立即失败
- *  8) journal_size_limit = 32MB：限制 WAL 体积，防止异常增长
- *  9) 数据库预编译语句缓存：db.prepare 结果模块级缓存，避免每次编译
- * 10) PRAGMA optimize：每次启动让 SQLite 重算统计信息，选更好的查询计划
+ * 内存预算（总计 < 50MB）:
+ *  1) cache_size = 16MB（-4096 pages/4KB）：SQLite 内部页缓存
+ *  2) mmap_size = 32MB：热数据 OS page cache 命中
+ *  3) WAL2 模式：写入并发更高，checkpoint 开销更小
+ *  4) synchronous = NORMAL：写性能提升 3-5 倍
+ *  5) temp_store = MEMORY：排序/分组零磁盘开销
+ *  6) journal_size_limit = 8MB：限制 WAL 体积
+ *  7) 覆盖索引：热点查询走索引不回表
+ *  8) 预编译语句缓存：模块级 LRU 缓存，避免重复编译
  */
 import Database from 'better-sqlite3'
 import path from 'path'
@@ -35,22 +33,20 @@ const db = new Database(dbPath, {
   timeout: 3000,
 })
 
-// ==================== SQLite 性能参数 ====================
-// WAL2（fallback 到 WAL）—— 读写真正并发，写入延迟 ~0.1ms
+// ==================== SQLite 性能参数（0.5GB 内存）====================
+// WAL2（fallback 到 WAL）—— 读写真正并发
 try { db.pragma('journal_mode = WAL2') } catch { db.pragma('journal_mode = WAL') }
 db.pragma('synchronous = NORMAL')
-// 64MB 内部缓存（1GB 内存下兼顾 500 用户，每页 4KB）
-db.pragma('cache_size = -65536')
-// 128MB mmap：热读走 OS page cache
-db.pragma('mmap_size = 134217728')
+// 16MB 内部缓存（每页 4KB × 4096 pages）
+db.pragma('cache_size = -4096')
+// 32MB mmap：热读走 OS page cache
+db.pragma('mmap_size = 33554432')
 db.pragma('temp_store = MEMORY')
-db.pragma('busy_timeout = 5000')
-// 每 500 页自动 checkpoint（~2MB），减少 WAL 堆积
-db.pragma('wal_autocheckpoint = 500')
-try { db.pragma('journal_size_limit = 16777216') } catch {} // 16MB
-// 分析当前表统计，让查询优化器选更好的计划
+db.pragma('busy_timeout = 3000')
+// 每 200 页自动 checkpoint（~800KB），减少 WAL 堆积
+db.pragma('wal_autocheckpoint = 200')
+try { db.pragma('journal_size_limit = 8388608') } catch {} // 8MB
 try { db.pragma('optimize') } catch {}
-// 限制 LIKE 查询使用索引
 db.pragma('case_sensitive_like = OFF')
 
 // ==================== 表结构 ====================
@@ -280,7 +276,7 @@ if (!officialExists) {
 // 缓存容量控制在 128，避免缓存膨胀
 class StmtCache {
   private map = new Map<string, Database.Statement>()
-  private max = 128
+  private max = 64
   get(sql: string): Database.Statement {
     let s = this.map.get(sql)
     if (!s) {

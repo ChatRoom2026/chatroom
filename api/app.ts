@@ -23,7 +23,6 @@ import verificationRoutes from './routes/verification.js'
 import downloadRoutes from './routes/download.js'
 import postsRoutes from './routes/posts.js'
 import vipRoutes from './routes/vip.js'
-import aiRoutes from './routes/ai.js'
 import groupRoutes from './routes/groups.js'
 import unreadRoutes from './routes/unread.js'
 import locationRoutes from './routes/location.js'
@@ -58,15 +57,15 @@ app.use((req: Request, res: Response, next) => {
 })
 
 // ==================== 2) 请求体解析（更小的默认上限） ====================
-app.use(express.json({ limit: '512kb' }))
-app.use(express.urlencoded({ extended: true, limit: '512kb' }))
+app.use(express.json({ limit: '256kb' }))
+app.use(express.urlencoded({ extended: true, limit: '256kb' }))
 
 // ==================== 3) 智能 gzip 响应压缩 ====================
 // - 小于 1KB 的响应：不压缩（压缩开销 > 节省的传输）
 // - 图片/视频/zip/已压缩：跳过
 // - 其他文本类：zlib.gzipSync 快速压缩（level 1）
 const COMPRESSIBLE_TYPES = /^(?:text\/|application\/json|application\/xml|application\/javascript|image\/svg\+xml|font\/|application\/manifest)/i
-const MIN_COMPRESS_BYTES = 1024
+const MIN_COMPRESS_BYTES = 2048
 
 app.use((req: Request, res: Response, next) => {
   const acceptEncoding = req.headers['accept-encoding']
@@ -126,6 +125,7 @@ app.use((req: Request, res: Response, next) => {
       return originalEnd()
     }
 
+    // 非压缩路径：直接透传原始调用
     if (chunk !== undefined && chunk !== null) return originalEnd(chunk, encodingOrCb, cb)
     return originalEnd(cb)
   }
@@ -168,7 +168,6 @@ app.use('/api/verification', verificationRoutes)
 app.use('/api/download', downloadRoutes)
 app.use('/api/posts', postsRoutes)
 app.use('/api/vip', vipRoutes)
-app.use('/api/ai', aiRoutes)
 app.use('/api/groups', groupRoutes)
 app.use('/api/unread', unreadRoutes)
 

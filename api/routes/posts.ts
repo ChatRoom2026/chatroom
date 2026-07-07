@@ -161,11 +161,25 @@ router.post('/:id/comments', authMiddleware, (req: Request, res: Response): void
         const now = new Date().toISOString()
         const preview = content.trim().slice(0, 50) + (content.trim().length > 50 ? '...' : '')
 
+        // 每个用户仅保留最近 20 条通知
+        const cleanupNotif = (targetUserId: number) => {
+          try {
+            const rows = stmtCache
+              .get('SELECT id FROM notifications WHERE userId = ? ORDER BY createdAt DESC LIMIT 20 OFFSET 20')
+              .all(targetUserId) as any[]
+            if (rows.length > 0) {
+              const ids = rows.map((r) => r.id).join(',')
+              stmtCache.get(`DELETE FROM notifications WHERE id IN (${ids})`).run()
+            }
+          } catch {}
+        }
+
         if (parentId && replyToUserId && replyToUserId !== userId) {
           // 回复评论：通知被回复的人
           stmtCache
             .get('INSERT INTO notifications (userId, type, postId, commentId, fromUserId, content, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
             .run(replyToUserId, 'reply', postId, result.lastInsertRowid, userId, preview, now)
+          cleanupNotif(replyToUserId)
           emitToUser(replyToUserId, 'new_notification', {
             id: result.lastInsertRowid,
             commentId: Number(result.lastInsertRowid),
@@ -180,6 +194,7 @@ router.post('/:id/comments', authMiddleware, (req: Request, res: Response): void
           stmtCache
             .get('INSERT INTO notifications (userId, type, postId, commentId, fromUserId, content, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
             .run(post.userId, 'comment', postId, result.lastInsertRowid, userId, preview, now)
+          cleanupNotif(post.userId)
           emitToUser(post.userId, 'new_notification', {
             id: result.lastInsertRowid,
             commentId: Number(result.lastInsertRowid),
@@ -197,6 +212,38 @@ router.post('/:id/comments', authMiddleware, (req: Request, res: Response): void
   } catch (error: any) {
     console.error('[posts-comments-post]', error?.message || error)
     res.status(500).json({ success: false, error: '评论失败' })
+  }
+})
+
+// 删除评论（仅本人可删除）
+router.delete('/:postId/comments/:commentId', authMiddleware, (req: Request, res: Response): void => {
+  try {
+    const userId = (req as any).user.id
+    const commentId = parseInt(req.params.commentId as string)
+
+    const comment = stmtCache
+      .get('SELECT id, userId, postId, parentId FROM comments WHERE id = ?')
+      .get(commentId) as any
+    if (!comment) {
+      res.status(404).json({ success: false, error: '评论不存在' })
+      return
+    }
+    if (comment.userId !== userId) {
+      res.status(403).json({ success: false, error: '只能删除自己的评论' })
+      return
+    }
+
+    // 删除该评论及其所有回复
+    const del = db.transaction(() => {
+      stmtCache.get('DELETE FROM comments WHERE parentId = ?').run(commentId)
+      stmtCache.get('DELETE FROM comments WHERE id = ?').run(commentId)
+    })
+    del()
+
+    res.json({ success: true })
+  } catch (error: any) {
+    console.error('[posts-comments-delete]', error?.message || error)
+    res.status(500).json({ success: false, error: '删除失败' })
   }
 })
 
@@ -241,7 +288,7 @@ router.get('/notifications/list', authMiddleware, (req: Request, res: Response):
            JOIN users u ON n.fromUserId = u.id
            WHERE n.userId = ?
            ORDER BY n.createdAt DESC
-           LIMIT 50`)
+           LIMIT 20`)
       .all(userId) as any[]
     res.json({ success: true, notifications })
   } catch (error: any) {
