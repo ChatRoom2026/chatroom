@@ -234,12 +234,37 @@ router.delete('/:postId/comments/:commentId', authMiddleware, (req: Request, res
       return
     }
 
+    // 官方号删除他人评论时，先获取评论内容用于通知
+    let commentContent = ''
+    const isOfficialDelete = isOfficial && comment.userId !== userId
+    if (isOfficialDelete) {
+      const c = stmtCache.get('SELECT content FROM comments WHERE id = ?').get(commentId) as any
+      commentContent = c?.content || ''
+    }
+
     // 删除该评论及其所有回复
     const del = db.transaction(() => {
       stmtCache.get('DELETE FROM comments WHERE parentId = ?').run(commentId)
       stmtCache.get('DELETE FROM comments WHERE id = ?').run(commentId)
     })
     del()
+
+    // 官方号删除他人评论后发送通知
+    if (isOfficialDelete) {
+      const now = new Date().toISOString()
+      const preview = commentContent.slice(0, 50) + (commentContent.length > 50 ? '...' : '')
+      const officialName = (req as any).user.username || '官方'
+      stmtCache
+        .get('INSERT INTO notifications (userId, type, postId, commentId, fromUserId, content, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(comment.userId, 'system', comment.postId, null, userId, `你的评论「${preview}」被${officialName}删除`, now)
+      emitToUser(comment.userId, 'new_notification', {
+        postId: comment.postId,
+        fromUserId: userId,
+        fromUsername: officialName,
+        type: 'system',
+        content: `你的评论「${preview}」被${officialName}删除`,
+      })
+    }
 
     res.json({ success: true })
   } catch (error: any) {
@@ -253,7 +278,7 @@ router.delete('/:id', authMiddleware, (req: Request, res: Response): void => {
     const userId = (req as any).user.id
     const postId = parseInt(req.params.id as string)
 
-    const post = stmtCache.get('SELECT userId FROM posts WHERE id = ?').get(postId) as any
+    const post = stmtCache.get('SELECT id, userId, content FROM posts WHERE id = ?').get(postId) as any
     if (!post) {
       res.status(404).json({ success: false, error: '动态不存在' })
       return
@@ -264,11 +289,31 @@ router.delete('/:id', authMiddleware, (req: Request, res: Response): void => {
       return
     }
 
+    const isOfficialDelete = isOfficial && post.userId !== userId
+
     const del = db.transaction(() => {
       stmtCache.get('DELETE FROM comments WHERE postId = ?').run(postId)
       stmtCache.get('DELETE FROM posts WHERE id = ?').run(postId)
     })
     del()
+
+    // 官方号删除他人动态后发送通知
+    if (isOfficialDelete) {
+      const now = new Date().toISOString()
+      const preview = (post.content || '').slice(0, 50) + ((post.content || '').length > 50 ? '...' : '')
+      const officialName = (req as any).user.username || '官方'
+      stmtCache
+        .get('INSERT INTO notifications (userId, type, postId, commentId, fromUserId, content, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(post.userId, 'system', null, null, userId, `你的动态「${preview}」被${officialName}删除`, now)
+      emitToUser(post.userId, 'new_notification', {
+        postId: null,
+        fromUserId: userId,
+        fromUsername: officialName,
+        type: 'system',
+        content: `你的动态「${preview}」被${officialName}删除`,
+      })
+    }
+
     res.json({ success: true })
   } catch (error: any) {
     console.error('[posts-delete]', error?.message || error)

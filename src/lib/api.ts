@@ -581,8 +581,8 @@ export interface Comment {
 
 export interface Notification {
   id: number
-  type: 'comment' | 'reply'
-  postId: number
+  type: 'comment' | 'reply' | 'system'
+  postId: number | null
   commentId: number | null
   fromUserId: number
   fromUsername: string

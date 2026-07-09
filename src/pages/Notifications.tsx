@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type Notification } from '@/lib/api'
-import { ArrowLeft, MessageCircle, Reply, Bell } from 'lucide-react'
+import { ArrowLeft, MessageCircle, Reply, Bell, Shield } from 'lucide-react'
 
 export default function Notifications() {
   const navigate = useNavigate()
@@ -29,6 +29,7 @@ export default function Notifications() {
         prev.map((item) => (item.id === n.id ? { ...item, isRead: 1 } : item))
       )
     }
+    if (n.type === 'system') return
     navigate(`/moments?highlightPost=${n.postId}&highlightComment=${n.commentId || ''}`)
   }
 
@@ -106,6 +107,8 @@ export default function Notifications() {
                 <div className="flex-shrink-0 mt-0.5">
                   {n.type === 'reply' ? (
                     <Reply className="w-4 h-4 text-green-400" />
+                  ) : n.type === 'system' ? (
+                    <Shield className="w-4 h-4 text-red-400" />
                   ) : (
                     <MessageCircle className="w-4 h-4 text-blue-400" />
                   )}
@@ -120,7 +123,7 @@ export default function Notifications() {
                     )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {n.type === 'reply' ? '回复了你' : '评论了你的动态'}
+                    {n.type === 'reply' ? '回复了你' : n.type === 'system' ? '系统通知' : '评论了你的动态'}
                   </p>
                   <p className="text-sm text-gray-300 mt-1">{n.content}</p>
                 </div>
