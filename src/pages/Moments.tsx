@@ -190,7 +190,7 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
             <p className="text-[11px] text-gray-500 italic mt-0.5 truncate">"{post.bio}"</p>
           )}
         </div>
-        {user?.id === post.userId && (
+        {(user?.id === post.userId || user?.isOfficial === 1) && (
           <button
             onClick={() => onDelete(post.id)}
             className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
@@ -267,7 +267,7 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
                                   <Reply className="w-3 h-3" />
                                   回复
                                 </button>
-                                {user?.id === c.userId && (
+                                {(user?.id === c.userId || user?.isOfficial === 1) && (
                                   <button
                                     onClick={() => handleDeleteComment(c.id)}
                                     className="text-[11px] text-gray-500 hover:text-red-400 transition-colors mt-0.5 flex items-center gap-0.5"
@@ -327,7 +327,7 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
                                           <Reply className="w-3 h-3" />
                                           回复
                                         </button>
-                                        {user?.id === reply.userId && (
+                                        {(user?.id === reply.userId || user?.isOfficial === 1) && (
                                           <button
                                             onClick={() => handleDeleteComment(reply.id)}
                                             className="text-[11px] text-gray-500 hover:text-red-400 transition-colors mt-0.5 flex items-center gap-0.5"

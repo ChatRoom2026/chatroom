@@ -228,7 +228,8 @@ router.delete('/:postId/comments/:commentId', authMiddleware, (req: Request, res
       res.status(404).json({ success: false, error: '评论不存在' })
       return
     }
-    if (comment.userId !== userId) {
+    const isOfficial = (req as any).user.isOfficial === 1
+    if (comment.userId !== userId && !isOfficial) {
       res.status(403).json({ success: false, error: '只能删除自己的评论' })
       return
     }
@@ -257,7 +258,8 @@ router.delete('/:id', authMiddleware, (req: Request, res: Response): void => {
       res.status(404).json({ success: false, error: '动态不存在' })
       return
     }
-    if (post.userId !== userId) {
+    const isOfficial = (req as any).user.isOfficial === 1
+    if (post.userId !== userId && !isOfficial) {
       res.status(403).json({ success: false, error: '只能删除自己的动态' })
       return
     }

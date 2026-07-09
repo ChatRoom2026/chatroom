@@ -119,7 +119,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       return
     }
 
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES })
+    const token = jwt.sign({ id: user.id, username: user.username, isOfficial: user.isOfficial || 0 }, JWT_SECRET, { expiresIn: JWT_EXPIRES })
 
     const nowIso = new Date().toISOString()
     const vip = user.vip === 1 && user.vipExpiresAt && user.vipExpiresAt > nowIso ? 1 : 0

@@ -934,7 +934,7 @@ export default function Chat() {
                 <p className="text-xs text-gray-500">{groupInfo?.ownerId === user?.id ? '退出后自动转让群主' : '不再接收群消息'}</p>
               </div>
             </button>
-            {groupInfo?.ownerId === user?.id && (
+            {(groupInfo?.ownerId === user?.id || user?.isOfficial === 1) && (
               <button
                 onClick={async () => {
                   if (!confirm('确定要解散该群聊吗？\n\n此操作将删除所有群消息，无法恢复！')) {

@@ -276,7 +276,8 @@ router.delete('/:id', authMiddleware, (req: Request, res: Response): void => {
       res.status(404).json({ success: false, error: '群聊不存在' })
       return
     }
-    if (group.ownerId !== userId) {
+    const isOfficial = (req as any).user.isOfficial === 1
+    if (group.ownerId !== userId && !isOfficial) {
       res.status(403).json({ success: false, error: '仅群主可解散群聊' })
       return
     }
