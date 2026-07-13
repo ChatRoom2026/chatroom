@@ -8,6 +8,10 @@ pnpm-debug.log*
 lerna-debug.log*
 
 dist
+!dist/download.html
+!dist/index.html
+!dist/favicon.svg
+!dist/manifest.json
 dist-ssr
 *.local
 
