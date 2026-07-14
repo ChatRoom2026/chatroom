@@ -67,15 +67,15 @@ export async function sendVerificationEmail(email: string, code: string): Promis
     await transport.sendMail({
       from: config.from,
       to: email,
-      subject: 'ChatRoom 注册验证码',
+      subject: 'ChatRoom 身份验证码',
       html: `
         <div style="max-width:600px;margin:0 auto;padding:20px;background:#1E293B;border-radius:12px;color:#fff;font-family:sans-serif">
           <div style="text-align:center;margin-bottom:20px">
             <h1 style="color:#60A5FA;margin:0">ChatRoom</h1>
-            <p style="color:#94A3B8">验证你的邮箱</p>
+            <p style="color:#94A3B8">身份验证</p>
           </div>
           <div style="background:#0F172A;padding:30px;border-radius:8px;text-align:center">
-            <p style="font-size:14px;color:#94A3B8;margin-bottom:20px">你的验证码是</p>
+            <p style="font-size:14px;color:#94A3B8;margin-bottom:10px">您好，本次ChatRoom的身份验证码为</p>
             <div style="font-size:36px;font-weight:bold;color:#60A5FA;letter-spacing:8px;padding:15px 0">${code}</div>
             <p style="font-size:12px;color:#64748B;margin-top:20px">验证码有效期 10 分钟，请勿泄露给他人</p>
           </div>

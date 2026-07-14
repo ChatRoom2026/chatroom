@@ -6,9 +6,9 @@
 
 import { isAndroid, isNativeApp } from './platform'
 
-// 双栈服务器地址：IPv6 优先，IPv4 自动降级
-const IPV6_BASE = 'http://[2409:8a50:1035:6d50:5228:73ff:fe48:f26f]:3001/api'
-const IPV4_BASE = 'http://120.228.82.170:3001/api'
+// 服务器地址：新服务器 IP
+const IPV4_BASE = 'http://8.163.85.218:3001/api'
+const IPV6_BASE = '' // 暂不使用 IPv6
 
 // Android 原生客户端：连接到本地运行的 Express 服务器（adb reverse 或局域网 IP）
 // 浏览器开发：使用 vite proxy 转发 /api
@@ -20,8 +20,8 @@ function detectApiBase(): string {
     }
     const stored = localStorage.getItem('api_base_url')
     if (stored) return stored
-    // 默认 IPv6 优先
-    return IPV6_BASE
+    // 默认使用 IPv4 地址
+    return IPV4_BASE
   }
   // 生产构建：使用 VITE_API_BASE 环境变量
   if (import.meta.env.VITE_API_BASE) {
@@ -31,8 +31,8 @@ function detectApiBase(): string {
 }
 
 let API_BASE = detectApiBase()
-// 备用地址（IPv6 失败时尝试 IPv4）
-let API_FALLBACK = (isNativeApp() && isAndroid() && API_BASE === IPV6_BASE) ? IPV4_BASE : ''
+// 备用地址（主地址失败时尝试 IPv4）
+let API_FALLBACK = (API_BASE !== IPV4_BASE && IPV4_BASE) ? IPV4_BASE : ''
 
 export function setApiBaseUrl(url: string) {
   API_BASE = url || '/api'

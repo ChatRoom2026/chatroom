@@ -17,14 +17,16 @@ const SERVER_URL = `http://localhost:${PORT}`;
 // ============ 启动 Express 后端 ============
 function startServer() {
   return new Promise((resolve) => {
-    const child = spawn('node', [
+    // 打包后用 Electron 自带的 Node 运行（ELECTRON_RUN_AS_NODE=1）
+    const nodeBin = process.execPath;
+    const child = spawn(nodeBin, [
       '--max-old-space-size=128',
       '--optimize-for-size',
       '--import', 'tsx',
       'api/server.ts'
     ], {
       cwd: path.join(__dirname, '..'),
-      env: { ...process.env, NODE_ENV: 'production', PORT: String(PORT) },
+      env: { ...process.env, NODE_ENV: 'production', PORT: String(PORT), ELECTRON_RUN_AS_NODE: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
