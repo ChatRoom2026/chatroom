@@ -133,10 +133,10 @@
     <p class="subtitle">选择你的平台，下载对应安装包</p>
 
     <div class="grid">
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-android.zip">
+      <a class="card" href="/downloads/app-debug.apk">
         <div class="icon">📱</div>
         <div class="name">Android APK</div>
-        <div class="desc">手机版 · 下载后解压安装</div>
+        <div class="desc">手机版 · 直接安装</div>
         <div class="size" id="size-apk">计算中...</div>
         <div class="badge">推荐</div>
       </a>
@@ -181,7 +181,7 @@
         }
       } catch {}
     }
-    getFileSize('https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-android.zip', 'size-apk')
+    getFileSize('/downloads/app-debug.apk', 'size-apk')
     getFileSize('https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-windows.zip', 'size-windows')
     getFileSize('https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-mac.zip', 'size-mac')
     getFileSize('https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-linux.zip', 'size-linux')

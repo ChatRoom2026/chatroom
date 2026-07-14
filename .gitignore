@@ -54,5 +54,8 @@ uploads/
 # Electron build output
 release/
 
+# Node modules
+node_modules/
+
 # iOS build artifacts
 ios/node_modules
