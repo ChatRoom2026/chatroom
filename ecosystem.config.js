@@ -20,10 +20,10 @@
  */
 module.exports = {
   apps: [{
-    name: 'chat-server',
+    name: 'chatroom',
     script: 'api/server.ts',
     interpreter: 'node',
-    interpreterArgs: '--loader tsx',
+    interpreterArgs: '--import tsx',
     args: '',
     instances: 1,
     exec_mode: 'fork',
@@ -39,9 +39,16 @@ module.exports = {
     env: {
       NODE_ENV: 'production',
       PORT: 3001,
-      // 限制 V8 堆到 1GB（一核机器通常配 1-2GB 内存）
-      // 防止 V8 过度 GC 或被 OOM Killer 杀掉
-      NODE_OPTIONS: '--max-old-space-size=1024 --use-largepages=on',
+      // 邮箱配置
+      MAIL_HOST: 'smtp.163.com',
+      MAIL_PORT: '465',
+      MAIL_USER: '13574196538@163.com',
+      MAIL_PASS: 'FAU8m36uQ8PunQ8P',
+      MAIL_FROM: '13574196538@163.com',
+      // 数据库
+      DATABASE_URL: './data/chatroom.db',
+      // 限制 V8 堆
+      NODE_OPTIONS: '--max-old-space-size=128 --optimize-for-size --max-semi-space-size=1 --initial-old-space-size=64',
     },
   }],
 }
