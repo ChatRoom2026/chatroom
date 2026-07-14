@@ -141,21 +141,21 @@
         <div class="badge">推荐</div>
       </a>
 
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-windows.zip">
+      <a class="card" href="/downloads/chatroom-windows.zip">
         <div class="icon">🪟</div>
         <div class="name">Windows</div>
         <div class="desc">桌面版 · 下载后解压安装</div>
         <div class="size" id="size-windows">计算中...</div>
       </a>
 
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-mac.zip">
+      <a class="card" href="/downloads/chatroom-mac.zip">
         <div class="icon">🍎</div>
         <div class="name">macOS</div>
         <div class="desc">桌面版 · 下载后解压安装</div>
         <div class="size" id="size-mac">计算中...</div>
       </a>
 
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-linux.zip">
+      <a class="card" href="/downloads/chatroom-linux.zip">
         <div class="icon">🐧</div>
         <div class="name">Linux</div>
         <div class="desc">桌面版 · 下载后解压安装</div>
@@ -182,9 +182,9 @@
       } catch {}
     }
     getFileSize('/downloads/app-debug.apk', 'size-apk')
-    getFileSize('https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-windows.zip', 'size-windows')
-    getFileSize('https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-mac.zip', 'size-mac')
-    getFileSize('https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/chatroom-linux.zip', 'size-linux')
+    getFileSize('/downloads/chatroom-windows.zip', 'size-windows')
+    getFileSize('/downloads/chatroom-mac.zip', 'size-mac')
+    getFileSize('/downloads/chatroom-linux.zip', 'size-linux')
 
     document.getElementById('updated-time').textContent = '更新于: ' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
   </script>
