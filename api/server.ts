@@ -10,6 +10,7 @@
  *   - OS + 其他: ~300MB 预留
  *   - 适合 512MB 内存 / 1 核 CPU（¥10-15/月）
  */
+import 'dotenv/config'
 import http from 'http'
 import fs from 'fs'
 import path from 'path'
