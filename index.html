@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatRoom 下载</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+    .card {
+      background: rgba(255,255,255,0.12);
+      backdrop-filter: blur(20px);
+      border-radius: 24px;
+      padding: 48px 40px;
+      text-align: center;
+      max-width: 440px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    }
+    .icon {
+      width: 80px;
+      height: 80px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 20px;
+      margin: 0 auto 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+    }
+    h1 { font-size: 28px; margin-bottom: 8px; font-weight: 700; }
+    .version { font-size: 14px; opacity: 0.7; margin-bottom: 32px; }
+    .info {
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 32px;
+      font-size: 14px;
+      line-height: 1.6;
+      text-align: left;
+    }
+    .info span { opacity: 0.7; }
+    .download-btn {
+      display: inline-block;
+      background: #fff;
+      color: #667eea;
+      padding: 14px 48px;
+      border-radius: 50px;
+      font-size: 18px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+    .download-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+    .footer { margin-top: 24px; font-size: 12px; opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">💬</div>
+    <h1>ChatRoom</h1>
+    <p class="version">Android 安装包</p>
+    <div class="info">
+      <p><span>文件名：</span>ChatRoom.apk</p>
+      <p><span>平台：</span>Android</p>
+    </div>
+    <a class="download-btn" href="ChatRoom.apk" download>立即下载</a>
+    <p class="footer">点击按钮即可下载安装</p>
+  </div>
+</body>
+</html>
