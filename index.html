@@ -102,21 +102,27 @@
     .corner-bl { bottom: 8px; left: 8px; border-width: 0 0 2px 2px; }
     .corner-br { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
     .icon {
-      width: 80px; height: 80px;
+      width: 96px; height: 96px;
       margin: 0 auto 24px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 40px;
-      border: 2px solid rgba(0,255,255,0.4);
-      background: rgba(0,255,255,0.05);
+      border: 2px solid rgba(0,255,255,0.3);
+      border-radius: 16px;
+      overflow: hidden;
       position: relative;
+      box-shadow: 0 0 30px rgba(0,255,255,0.2), inset 0 0 20px rgba(0,255,255,0.05);
+    }
+    .icon img {
+      width: 100%; height: 100%;
+      object-fit: cover;
     }
     .icon::after {
       content: '';
       position: absolute;
       inset: -2px;
       border: 1px solid rgba(0,255,255,0.2);
+      border-radius: 18px;
       animation: iconPulse 2s ease-in-out infinite;
     }
     @keyframes iconPulse {
@@ -225,7 +231,7 @@
     <div class="corner corner-bl"></div>
     <div class="corner corner-br"></div>
 
-    <div class="icon">&#x25C8;</div>
+    <div class="icon"><img src="app-icon.png" alt="ChatRoom"></div>
     <h1>CHATROOM</h1>
     <p class="subtitle">&#x25CF; Secure Communication</p>
     <div class="divider"></div>
