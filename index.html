@@ -5,79 +5,239 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ChatRoom 下载</title>
   <style>
+    @font-face {
+      font-family: 'Cyber';
+      src: local('Courier New'), local('monospace');
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: 'Courier New', 'Consolas', 'Monaco', monospace;
+      background: #0a0a0f;
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+    /* scanline effect */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,255,255,0.015) 2px,
+        rgba(0,255,255,0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 10;
+    }
+    /* grid background */
+    .grid {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background-image:
+        linear-gradient(rgba(0,255,255,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,255,0.06) 1px, transparent 1px);
+      background-size: 60px 60px;
+      z-index: 0;
+    }
+    /* glow orb */
+    .glow {
+      position: fixed;
+      width: 600px; height: 600px;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.15;
+      z-index: 0;
+    }
+    .glow-1 {
+      background: #00ffff;
+      top: -200px; left: -200px;
+    }
+    .glow-2 {
+      background: #7b00ff;
+      bottom: -200px; right: -200px;
     }
     .card {
-      background: rgba(255,255,255,0.12);
-      backdrop-filter: blur(20px);
-      border-radius: 24px;
+      position: relative;
+      z-index: 5;
+      background: rgba(10,14,20,0.85);
+      border: 1px solid rgba(0,255,255,0.25);
+      border-radius: 4px;
       padding: 48px 40px;
       text-align: center;
-      max-width: 440px;
+      max-width: 460px;
       width: 90%;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      backdrop-filter: blur(10px);
+      clip-path: polygon(
+        0 16px, 16px 0, calc(100% - 16px) 0, 100% 16px,
+        100% calc(100% - 16px), calc(100% - 16px) 100%,
+        16px 100%, 0 calc(100% - 16px)
+      );
     }
+    .card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(0,255,255,0.08);
+      clip-path: inherit;
+      transform: scale(1.03);
+      z-index: -1;
+    }
+    .corner {
+      position: absolute;
+      width: 20px; height: 20px;
+      border-color: #00ffff;
+      border-style: solid;
+      z-index: 2;
+    }
+    .corner-tl { top: 8px; left: 8px; border-width: 2px 0 0 2px; }
+    .corner-tr { top: 8px; right: 8px; border-width: 2px 2px 0 0; }
+    .corner-bl { bottom: 8px; left: 8px; border-width: 0 0 2px 2px; }
+    .corner-br { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
     .icon {
-      width: 80px;
-      height: 80px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 20px;
+      width: 80px; height: 80px;
       margin: 0 auto 24px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 36px;
+      font-size: 40px;
+      border: 2px solid rgba(0,255,255,0.4);
+      background: rgba(0,255,255,0.05);
+      position: relative;
     }
-    h1 { font-size: 28px; margin-bottom: 8px; font-weight: 700; }
-    .version { font-size: 14px; opacity: 0.7; margin-bottom: 32px; }
-    .info {
-      background: rgba(255,255,255,0.1);
-      border-radius: 12px;
-      padding: 16px;
+    .icon::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border: 1px solid rgba(0,255,255,0.2);
+      animation: iconPulse 2s ease-in-out infinite;
+    }
+    @keyframes iconPulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 0.8; }
+    }
+    h1 {
+      font-size: 32px;
+      margin-bottom: 4px;
+      color: #00ffff;
+      text-shadow: 0 0 20px rgba(0,255,255,0.5), 0 0 60px rgba(0,255,255,0.2);
+      letter-spacing: 4px;
+      font-weight: 400;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: rgba(0,255,255,0.5);
+      letter-spacing: 6px;
       margin-bottom: 32px;
-      font-size: 14px;
-      line-height: 1.6;
-      text-align: left;
+      text-transform: uppercase;
     }
-    .info span { opacity: 0.7; }
+    .divider {
+      width: 60px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(0,255,255,0.5), transparent);
+      margin: 0 auto 24px;
+    }
+    .info {
+      text-align: left;
+      font-size: 13px;
+      line-height: 2;
+      color: rgba(200,220,255,0.8);
+      margin-bottom: 32px;
+      padding: 0 8px;
+    }
+    .info .label {
+      color: rgba(0,255,255,0.6);
+      margin-right: 4px;
+    }
+    .info .value {
+      color: #b8d4ff;
+    }
     .download-btn {
       display: inline-block;
-      background: #fff;
-      color: #667eea;
+      background: transparent;
+      color: #00ffff;
+      border: 1px solid #00ffff;
       padding: 14px 48px;
-      border-radius: 50px;
-      font-size: 18px;
-      font-weight: 600;
+      font-size: 16px;
+      font-family: inherit;
       text-decoration: none;
-      transition: transform 0.2s, box-shadow 0.2s;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      letter-spacing: 3px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s;
+      text-shadow: 0 0 10px rgba(0,255,255,0.5);
+      box-shadow: 0 0 20px rgba(0,255,255,0.15), inset 0 0 20px rgba(0,255,255,0.05);
     }
     .download-btn:hover {
+      background: rgba(0,255,255,0.1);
+      box-shadow: 0 0 40px rgba(0,255,255,0.3), inset 0 0 30px rgba(0,255,255,0.1);
       transform: translateY(-2px);
-      box-shadow: 0 8px 30px rgba(0,0,0,0.25);
     }
-    .footer { margin-top: 24px; font-size: 12px; opacity: 0.5; }
+    .download-btn::before {
+      content: '';
+      position: absolute;
+      top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(0,255,255,0.15), transparent);
+      transition: left 0.5s;
+    }
+    .download-btn:hover::before {
+      left: 100%;
+    }
+    .footer {
+      margin-top: 24px;
+      font-size: 11px;
+      color: rgba(0,255,255,0.3);
+      letter-spacing: 2px;
+    }
+    /* status dot */
+    .status {
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: #00ffff;
+      border-radius: 50%;
+      margin-right: 6px;
+      box-shadow: 0 0 6px #00ffff;
+      animation: blink 1.5s ease-in-out infinite;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
   </style>
 </head>
 <body>
+  <div class="grid"></div>
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+
   <div class="card">
-    <div class="icon">💬</div>
-    <h1>ChatRoom</h1>
-    <p class="version">Android 安装包</p>
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
+
+    <div class="icon">&#x25C8;</div>
+    <h1>CHATROOM</h1>
+    <p class="subtitle">&#x25CF; Secure Communication</p>
+    <div class="divider"></div>
+
     <div class="info">
-      <p><span>文件名：</span>ChatRoom.apk</p>
-      <p><span>平台：</span>Android</p>
+      <p><span class="label">&#x25B8; 文件名</span> <span class="value">ChatRoom.apk</span></p>
+      <p><span class="label">&#x25B8; 平台</span> <span class="value">Android</span></p>
+      <p><span class="label">&#x25B8; 状态</span> <span class="value"><span class="status"></span>READY</span></p>
     </div>
-    <a class="download-btn" href="ChatRoom.apk" download>立即下载</a>
-    <p class="footer">点击按钮即可下载安装</p>
+
+    <a class="download-btn" href="ChatRoom.apk" download>&#x25BC; 下 载</a>
+    <p class="footer">[ SYSTEM READY ]</p>
   </div>
 </body>
 </html>
