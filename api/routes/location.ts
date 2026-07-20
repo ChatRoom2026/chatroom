@@ -25,7 +25,7 @@ function lookupIpLocation(ip: string): Promise<{ country?: string; regionName?: 
       const req = http.get(
         {
           host: 'ip-api.com',
-          path: `/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city,isp`,
+          path: `/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city,isp&lang=zh-CN`,
           timeout: 3000,
         },
         (res) => {

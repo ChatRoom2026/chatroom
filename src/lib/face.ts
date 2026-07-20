@@ -197,7 +197,7 @@ export async function captureFaceDescriptor(
   if (modelReady) {
     try {
       const result = await faceapi
-        .detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+        .detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.5 }))
         .withFaceLandmarks()
         .withFaceDescriptor()
 
