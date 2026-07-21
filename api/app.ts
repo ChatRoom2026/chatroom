@@ -60,8 +60,21 @@ app.use((req: Request, res: Response, next) => {
 })
 
 // ==================== 2) 请求体解析 ====================
-app.use(express.json({ limit: '50mb' }))
-app.use(express.urlencoded({ extended: true, limit: '50mb' }))
+// 对 multipart/form-data 请求跳过 body parser，由 multer 处理
+app.use((req: Request, res: Response, next) => {
+  const ct = req.headers['content-type'] || ''
+  if (ct.startsWith('multipart/form-data')) {
+    return next()
+  }
+  express.json({ limit: '50mb' })(req, res, next)
+})
+app.use((req: Request, res: Response, next) => {
+  const ct = req.headers['content-type'] || ''
+  if (ct.startsWith('multipart/form-data')) {
+    return next()
+  }
+  express.urlencoded({ extended: true, limit: '50mb' })(req, res, next)
+})
 
 // ==================== 3) 智能 gzip 响应压缩 ====================
 // - 小于 1KB 的响应：不压缩（压缩开销 > 节省的传输）
