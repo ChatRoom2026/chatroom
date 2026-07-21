@@ -175,7 +175,23 @@ app.use('/api/unread', unreadRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/error', errorReportRoutes)
 
-// ==================== 7) Health check（零依赖） ====================
+// ==================== 7) 自动部署（零依赖） ====================
+app.post('/api/deploy', (req: Request, res: Response) => {
+  const secret = req.headers['x-deploy-secret'] || req.body?.secret
+  if (secret !== 'chatroom2026') {
+    res.status(403).json({ success: false, error: '密钥错误' })
+    return
+  }
+  const { execSync } = require('child_process')
+  try {
+    const out = execSync('cd /opt/chatroom && git pull origin master && npx vite build && pm2 restart chatroom --update-env', { encoding: 'utf-8', timeout: 120000 })
+    res.json({ success: true, output: out })
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+// ==================== 8) Health check（零依赖） ====================
 app.use('/api/health', (_req: Request, res: Response) => {
   res.status(200).json({ success: true, message: 'ok' })
 })
