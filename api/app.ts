@@ -59,9 +59,9 @@ app.use((req: Request, res: Response, next) => {
   next()
 })
 
-// ==================== 2) 请求体解析（更小的默认上限） ====================
-app.use(express.json({ limit: '256kb' }))
-app.use(express.urlencoded({ extended: true, limit: '256kb' }))
+// ==================== 2) 请求体解析 ====================
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
 // ==================== 3) 智能 gzip 响应压缩 ====================
 // - 小于 1KB 的响应：不压缩（压缩开销 > 节省的传输）
