@@ -28,6 +28,7 @@ import unreadRoutes from './routes/unread.js'
 import locationRoutes from './routes/location.js'
 import aiRoutes from './routes/ai.js'
 import errorReportRoutes from './routes/errorReport.js'
+import adminRoutes from './routes/admin.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -174,6 +175,7 @@ app.use('/api/groups', groupRoutes)
 app.use('/api/unread', unreadRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/error', errorReportRoutes)
+app.use('/api/admin', adminRoutes)
 
 // ==================== 7) 自动部署（零依赖） ====================
 app.post('/api/deploy', (req: Request, res: Response) => {

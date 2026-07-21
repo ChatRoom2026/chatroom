@@ -19,6 +19,7 @@ import Moments from "@/pages/Moments"
 import CreatePost from "@/pages/CreatePost"
 import VipPlans from "@/pages/VipPlans"
 import Notifications from "@/pages/Notifications"
+import AdminPanel from "@/pages/AdminPanel"
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
@@ -235,6 +236,7 @@ export default function App() {
         <Route path="/moments/create" element={<ProtectedRoute><CreatePost /></ProtectedRoute>} />
         <Route path="/vip" element={<ProtectedRoute><VipPlans /></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+        <Route path="/admin" element={<ProtectedRoute><AdminPanel /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       {isLoggedIn && (

@@ -320,6 +320,15 @@ export default function Friends() {
               >
                 <SettingsIcon className="w-5 h-5" />
               </button>
+              {user?.isOfficial === 1 && (
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="p-2 text-yellow-400 hover:text-yellow-300 hover:bg-gray-700 rounded-lg transition-colors"
+                  title="管理后台"
+                >
+                  <Shield className="w-5 h-5" />
+                </button>
+              )}
               <button
                 onClick={() => navigate('/about')}
                 className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
