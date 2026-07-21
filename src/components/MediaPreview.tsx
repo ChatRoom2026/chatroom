@@ -9,6 +9,7 @@
  */
 import { useState, useEffect, useRef } from 'react'
 import { X, Play, Download, ZoomIn, ZoomOut, RotateCw } from 'lucide-react'
+import { resolveStaticUrl } from '@/lib/api'
 
 interface MediaPreviewProps {
   type: 'image' | 'video'
@@ -19,6 +20,7 @@ interface MediaPreviewProps {
 }
 
 export function MediaPreview({ type, url, filename, thumbSize = 240 }: MediaPreviewProps) {
+  const resolvedUrl = resolveStaticUrl(url)
   const [open, setOpen] = useState(false)
   // 视频缩略图：显示首帧（用 lazy loading 避免阻塞）
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -40,7 +42,7 @@ export function MediaPreview({ type, url, filename, thumbSize = 240 }: MediaPrev
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation()
     const a = document.createElement('a')
-    a.href = url
+    a.href = resolvedUrl
     a.download = filename || 'download'
     a.target = '_blank'
     document.body.appendChild(a)
@@ -58,7 +60,7 @@ export function MediaPreview({ type, url, filename, thumbSize = 240 }: MediaPrev
           style={{ maxWidth: thumbSize, maxHeight: thumbSize * 1.4 }}
         >
           <img
-            src={url}
+            src={resolvedUrl}
             alt={filename || 'image'}
             className="block object-contain bg-[#0F172A]"
             style={{ maxWidth: thumbSize, maxHeight: thumbSize * 1.4 }}
@@ -73,7 +75,7 @@ export function MediaPreview({ type, url, filename, thumbSize = 240 }: MediaPrev
         >
           <video
             ref={videoRef}
-            src={`${url}#t=0.1`}
+            src={`${resolvedUrl}#t=0.1`}
             muted
             playsInline
             preload="metadata"
@@ -152,7 +154,7 @@ export function MediaPreview({ type, url, filename, thumbSize = 240 }: MediaPrev
           >
             {type === 'image' ? (
               <img
-                src={url}
+                src={resolvedUrl}
                 alt={filename || 'image'}
                 className="max-w-full max-h-full object-contain transition-transform"
                 style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
@@ -164,7 +166,7 @@ export function MediaPreview({ type, url, filename, thumbSize = 240 }: MediaPrev
               // 同时在关闭时（open=false）卸载 src，释放解码器
               <video
                 key={openKey}
-                src={url}
+                src={resolvedUrl}
                 controls
                 autoPlay
                 playsInline

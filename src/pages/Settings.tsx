@@ -76,7 +76,6 @@ export default function Settings() {
   const [deleting, setDeleting] = useState(false)
 
   // 定位相关
-  const [locating, setLocating] = useState(false)
   const [locLoadingByIp, setLocLoadingByIp] = useState(false)
   const [locMessage, setLocMessage] = useState('')
 
@@ -187,44 +186,9 @@ export default function Settings() {
     }
   }
 
-  // ========== 自动定位：先尝试 navigator.geolocation，失败则用 IP 归属地 ==========
+  // ========== 自动定位：直接使用 IP 归属地（返回中文城市名） ==========
   async function handleAutoLocate() {
     setLocMessage('')
-
-    // 优先：浏览器地理定位（手机 GPS / 浏览器定位）
-    if (navigator.geolocation) {
-      setLocating(true)
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          try {
-            const res = await api.updateLocation({
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-              location: `经纬度 ${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`,
-            })
-            setRegion(res.region || '已定位')
-            setLocMessage('✓ 已通过浏览器定位')
-          } catch (err: any) {
-            setLocMessage(`⚠ 浏览器定位失败：${err.message || '未知错误'}`)
-            // fallback 到 IP 归属地
-            await fetchIpLocation()
-          } finally {
-            setLocating(false)
-          }
-        },
-        async (geoErr) => {
-          setLocating(false)
-          setLocMessage(`⚠ 定位被拒绝：${geoErr?.message || '请在浏览器中允许定位'}`)
-          await fetchIpLocation()
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-      )
-    } else {
-      await fetchIpLocation()
-    }
-  }
-
-  async function fetchIpLocation() {
     setLocLoadingByIp(true)
     try {
       const res = await api.getLocationByIp()
@@ -620,11 +584,11 @@ export default function Settings() {
                 <button
                   type="button"
                   onClick={handleAutoLocate}
-                  disabled={locating || locLoadingByIp}
+                  disabled={locLoadingByIp}
                   title="自动定位"
                   className="px-3 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1 text-xs disabled:opacity-50"
                 >
-                  {(locating || locLoadingByIp) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {locLoadingByIp && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   <Navigation className="w-4 h-4" />
                   自动定位
                 </button>

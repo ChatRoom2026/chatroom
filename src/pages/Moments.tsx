@@ -132,7 +132,7 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
         <p className="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">{post.content}</p>
         {post.imageUrl && isVideo && (
           <video
-            src={post.imageUrl}
+            src={resolveStaticUrl(post.imageUrl)}
             controls
             preload="metadata"
             className="mt-3 rounded-xl max-h-80 w-full bg-black"
@@ -140,11 +140,11 @@ function PostCard({ post, onComment, onDelete, onEnlarge, onAvatarClick, highlig
         )}
         {post.imageUrl && !isVideo && (
           <button
-            onClick={() => onEnlarge(post.imageUrl)}
+            onClick={() => onEnlarge(resolveStaticUrl(post.imageUrl))}
             className="block w-full text-left mt-3"
           >
             <img
-              src={post.imageUrl}
+              src={resolveStaticUrl(post.imageUrl)}
               alt=""
               className="rounded-xl max-h-60 w-full object-contain bg-[#0F172A] hover:opacity-90 transition-opacity"
               loading="lazy"
