@@ -252,7 +252,7 @@ export default function Settings() {
       const res = await api.uploadFile(file)
       const avatarUrl = res.url
       await api.updateAvatar(avatarUrl)
-      setAvatar(avatarUrl)
+      setAvatar(avatarUrl + '?t=' + Date.now())
 
       const userStr = localStorage.getItem('user')
       if (userStr) {

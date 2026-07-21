@@ -117,9 +117,12 @@ router.post('/', authMiddleware, upload.single('file'), uploadErrorHandler, asyn
 
     // 降级：本地存储
     const filename = (req.file as any).filename
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http'
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3001'
+    const fullUrl = `${protocol}://${host}/uploads/${filename}`
     res.json({
       success: true,
-      url: `/uploads/${filename}`,
+      url: fullUrl,
       type: mimetype,
       contentType: mimetype,
       originalName: req.file.originalname,
