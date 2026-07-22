@@ -1,7 +1,7 @@
 """
-ChatRoom 轻量级 AI 浏览器代理
-- 使用 Playwright 控制浏览器，Ollama 本地模型做决策
-- 零付费依赖，内存占用极低
+ChatRoom 轻量级浏览器代理
+- 纯 Playwright，零 LLM 依赖，极低内存
+- 支持自然语言命令解析（搜索、打开网页、截图、提取内容等）
 - 端口: 3002
 """
 import os
@@ -9,212 +9,114 @@ import sys
 import json
 import time
 import uuid
-import base64
+import re
 import threading
 import logging
 import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
-from typing import Optional
+from urllib.parse import quote
 
 logging.basicConfig(level=logging.INFO, format='[browser-agent] %(message)s')
 logger = logging.getLogger('browser-agent')
 
 PORT = int(os.getenv('BROWSER_AGENT_PORT', '3002'))
 CALLBACK_URL = os.getenv('BROWSER_CALLBACK_URL', 'http://localhost:3001/api/ai/callback')
-
-# Ollama 配置
-OLLAMA_BASE = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3:0.6b')  # 最小模型，仅 ~400MB
-MAX_STEPS_DEFAULT = int(os.getenv('BROWSER_MAX_STEPS', '8'))
+MAX_STEPS = int(os.getenv('BROWSER_MAX_STEPS', '5'))
 
 # 任务存储
 tasks: dict[str, dict] = {}
 tasks_lock = threading.Lock()
 
-
-def _call_ollama(messages: list[dict], tools: Optional[list[dict]] = None) -> dict:
-    """调用 Ollama API（兼容 OpenAI 格式）"""
-    import urllib.request
-    import urllib.error
-
-    payload = {
-        'model': OLLAMA_MODEL,
-        'messages': messages,
-        'stream': False,
-        'options': {'temperature': 0.1, 'num_predict': 512},
-    }
-    if tools:
-        payload['tools'] = tools
-
-    data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(
-        f'{OLLAMA_BASE}/v1/chat/completions',
-        data=data,
-        headers={'Content-Type': 'application/json'},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read())
-    except urllib.error.URLError as e:
-        raise RuntimeError(f'Ollama 连接失败: {e}. 请确保 Ollama 已启动，模型 {OLLAMA_MODEL} 已拉取')
+# 默认搜索引擎
+SEARCH_ENGINE = 'https://www.baidu.com/s?wd={query}'
 
 
-def _get_page_snapshot(page) -> str:
-    """获取页面可交互元素快照（省 token，不需要视觉模型）"""
-    try:
-        snapshot = page.evaluate('''() => {
-            const title = document.title || '';
-            const url = location.href;
-            const els = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="menuitem"], [onclick], h1, h2, h3, h4, [tabindex]');
-            const seen = new Set();
-            const items = [];
-            let idx = 0;
-            els.forEach(el => {
-                if (seen.has(el)) return;
-                seen.add(el);
-                const tag = el.tagName?.toLowerCase() || '';
-                const type = el.type || '';
-                const text = (el.textContent || el.value || el.placeholder || el.getAttribute('aria-label') || el.title || '').trim().substring(0, 80);
-                const id = el.id || '';
-                const cls = (el.className && typeof el.className === 'string') ? el.className.split(' ').slice(0, 3).join('.') : '';
-                const href = el.href || el.getAttribute('data-href') || '';
-                const visible = el.offsetParent !== null;
-                if (!visible) return;
-                idx++;
-                items.push(`${idx}. <${tag}${type ? ' type=' + type : ''}${id ? ' id=' + id : ''}${cls ? ' class=' + cls : ''}${href ? ' href=' + href.substring(0, 60) : ''}>${text}</${tag}>`);
-                if (items.length >= 60) return;
-            });
-            return `URL: ${url}\\nTitle: ${title}\\n\\nInteractive elements:\\n${items.join('\\n')}`;
-        }''')
-        return snapshot or '(页面为空或无法解析)'
-    except Exception as e:
-        return f'(获取页面快照失败: {e})'
+def parse_command(task: str) -> list[dict]:
+    """解析自然语言命令为操作序列"""
+    task_lower = task.lower().strip()
+    actions = []
 
+    # 提取 URL
+    url_match = re.search(r'(https?://[^\s，,。]+)', task)
+    if url_match:
+        url = url_match.group(1)
+        # 去除 URL 中的引号
+        url = url.strip('\'"')
+        actions.append({'action': 'navigate', 'url': url})
+        # 提取导航后的操作
+        remaining = task.replace(url_match.group(1), '').strip()
+        if remaining:
+            sub_actions = _parse_remaining(remaining)
+            actions.extend(sub_actions)
+        return actions if actions else [{'action': 'navigate', 'url': url}]
 
-def _get_browser_tools() -> list[dict]:
-    """返回 Ollama function calling 工具定义"""
-    return [
-        {
-            'type': 'function',
-            'function': {
-                'name': 'browser_action',
-                'description': '在浏览器中执行一个操作',
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'action': {
-                            'type': 'string',
-                            'enum': ['navigate', 'click', 'type', 'scroll_down', 'scroll_up', 'go_back', 'extract', 'wait', 'done'],
-                            'description': '要执行的操作'
-                        },
-                        'url': {'type': 'string', 'description': '导航目标 URL（action=navigate 时必填）'},
-                        'selector': {'type': 'string', 'description': '元素编号（如 "3"）或 CSS 选择器（action=click/type 时使用）'},
-                        'text': {'type': 'string', 'description': '要输入的文本（action=type 时必填）'},
-                        'reason': {'type': 'string', 'description': '为什么执行这个操作'},
-                        'result': {'type': 'string', 'description': '任务完成时的总结（action=done 时必填）'},
-                    },
-                    'required': ['action', 'reason']
-                }
-            }
-        }
+    # 搜索命令
+    search_patterns = [
+        r'(?:搜索|查|搜|百度|google|帮我找|帮我查|查找|搜索一下)(?:一下|下)?[：:\s]*(.+)',
+        r'(.+)(?:是什么|什么意思|怎么样|怎么(?:样|办))',
     ]
+    for pat in search_patterns:
+        m = re.search(pat, task_lower)
+        if m:
+            query = m.group(1).strip()
+            if query:
+                actions.append({'action': 'search', 'query': query})
+                return actions
+
+    # 打开网页
+    site_patterns = [
+        (r'(?:打开|去|访问|浏览|看(?:一下|看)?)(?:网站|网页)?[：:\s]*(.+)', 'navigate'),
+    ]
+    for pat, act in site_patterns:
+        m = re.search(pat, task_lower)
+        if m:
+            target = m.group(1).strip()
+            if '.' in target:
+                url = target if target.startswith('http') else f'https://{target}'
+                actions.append({'action': 'navigate', 'url': url})
+            else:
+                actions.append({'action': 'search', 'query': target})
+            return actions
+
+    # 截图
+    if re.search(r'(截图|截屏|screenshot|capture)', task_lower):
+        actions.append({'action': 'screenshot'})
+        return actions
+
+    # 默认：当作搜索
+    if task.strip():
+        actions.append({'action': 'search', 'query': task.strip()})
+    return actions
 
 
-def _execute_action(page, browser, action: dict) -> str:
-    """执行浏览器操作"""
-    act = action.get('action', '')
-    try:
-        if act == 'navigate':
-            url = action.get('url', '')
-            if not url.startswith('http'):
-                url = 'https://' + url
-            page.goto(url, timeout=15000, wait_until='domcontentloaded')
-            page.wait_for_timeout(1000)
-            return f'已导航到: {page.url}'
+def _parse_remaining(text: str) -> list[dict]:
+    """解析剩余操作"""
+    actions = []
+    text = text.strip().lstrip('，,。').strip()
 
-        elif act == 'click':
-            sel = str(action.get('selector', ''))
-            # 如果是数字，用快照中的索引
-            page.evaluate(f'''
-                const idx = parseInt("{sel}");
-                if (!isNaN(idx)) {{
-                    const els = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="menuitem"], [onclick]');
-                    const visible = Array.from(els).filter(e => e.offsetParent !== null);
-                    if (visible[idx - 1]) {{
-                        visible[idx - 1].click();
-                        return;
-                    }}
-                }}
-                // fallback to CSS selector
-                const el = document.querySelector("{sel}");
-                if (el) el.click();
-            ''')
-            page.wait_for_timeout(1500)
-            return f'已点击元素: {sel}'
+    # 点击
+    click_match = re.search(r'(?:点击|按下|按|click)[：:\s]*(.+)', text, re.IGNORECASE)
+    if click_match:
+        target = click_match.group(1).strip().rstrip('，,。')
+        actions.append({'action': 'click_text', 'text': target})
 
-        elif act == 'type':
-            sel = str(action.get('selector', ''))
-            text = action.get('text', '')
-            page.evaluate(f'''
-                const idx = parseInt("{sel}");
-                if (!isNaN(idx)) {{
-                    const els = document.querySelectorAll('input, textarea, select, [role="textbox"], [role="combobox"]');
-                    const visible = Array.from(els).filter(e => e.offsetParent !== null);
-                    if (visible[idx - 1]) {{
-                        const el = visible[idx - 1];
-                        el.focus();
-                        el.value = '';
-                        el.value = {json.dumps(text)};
-                        el.dispatchEvent(new Event("input", {{bubbles: true}}));
-                        return;
-                    }}
-                }}
-                const el = document.querySelector("{sel}");
-                if (el) {{
-                    el.focus();
-                    el.value = '';
-                    el.value = {json.dumps(text)};
-                    el.dispatchEvent(new Event("input", {{bubbles: true}}));
-                }}
-            ''')
-            page.wait_for_timeout(500)
-            return f'已输入文本到: {sel}'
+    # 输入
+    type_match = re.search(r'(?:输入|填写|键入|type)[：:\s]*(.+)', text, re.IGNORECASE)
+    if type_match:
+        content = type_match.group(1).strip().rstrip('，,。')
+        actions.append({'action': 'type_text', 'text': content})
 
-        elif act == 'scroll_down':
-            page.evaluate('window.scrollBy(0, 500)')
-            page.wait_for_timeout(500)
-            return '已向下滚动'
+    # 提取
+    if re.search(r'(?:提取|获取|抓取|extract|内容)', text, re.IGNORECASE):
+        actions.append({'action': 'extract'})
 
-        elif act == 'scroll_up':
-            page.evaluate('window.scrollBy(0, -500)')
-            page.wait_for_timeout(500)
-            return '已向上滚动'
-
-        elif act == 'go_back':
-            page.go_back(timeout=10000)
-            page.wait_for_timeout(1000)
-            return '已返回上一页'
-
-        elif act == 'extract':
-            text = page.evaluate('() => document.body?.innerText?.substring(0, 3000) || ""')
-            return f'页面内容:\n{text}'
-
-        elif act == 'wait':
-            page.wait_for_timeout(2000)
-            return '已等待 2 秒'
-
-        elif act == 'done':
-            return action.get('result', '任务完成')
-
-        else:
-            return f'未知操作: {act}'
-
-    except Exception as e:
-        return f'操作失败 ({act}): {e}'
+    if not actions:
+        actions.append({'action': 'extract'})
+    return actions
 
 
-def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS_DEFAULT):
+def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
     """执行浏览器任务"""
     try:
         from playwright.sync_api import sync_playwright
@@ -225,102 +127,133 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS_DE
 
         logger.info(f'[任务 {task_id}] 开始: {task_desc[:100]}')
 
+        actions = parse_command(task_desc)
+        logger.info(f'[任务 {task_id}] 解析操作: {json.dumps(actions, ensure_ascii=False)}')
+
+        if not actions:
+            with tasks_lock:
+                tasks[task_id]['status'] = 'failed'
+                tasks[task_id]['error'] = '无法解析任务命令'
+            _notify_callback(task_id, 'failed', '无法解析任务命令')
+            return
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=[
                 '--no-sandbox', '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage', '--disable-gpu',
-                '--single-process',  # 省内存
+                '--single-process',
             ])
             context = browser.new_context(
                 viewport={'width': 1280, 'height': 720},
                 user_agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
             )
             page = context.new_page()
+            results = []
 
-            messages = [
-                {
-                    'role': 'system',
-                    'content': (
-                        '你是一个浏览器自动化助手。用户会给你一个任务，你需要逐步完成。'
-                        '每个回合你会收到当前页面的元素快照，然后使用 browser_action 函数执行操作。'
-                        '可用操作: navigate(导航到URL), click(点击元素), type(输入文本), '
-                        'scroll_down(向下滚动), scroll_up(向上滚动), go_back(返回), '
-                        'extract(提取页面文本), wait(等待), done(标记任务完成)。'
-                        '尽量用元素编号来选择元素，编号在快照中每行开头。'
-                        '在确定任务完成或无法继续时，使用 done 操作并给出总结。'
-                    )
-                },
-                {
-                    'role': 'user',
-                    'content': f'任务: {task_desc}\n\n首先，请导航到一个合适的网站开始执行任务。'
-                    '如果任务中提到了具体网址，请直接导航过去。否则请使用搜索引擎。'
-                }
-            ]
+            for i, action in enumerate(actions[:max_steps]):
+                act = action.get('action', '')
+                logger.info(f'[任务 {task_id}] 步骤 {i + 1}: {act}')
 
-            final_result = ''
-            for step in range(max_steps):
-                # 获取页面快照
-                snapshot = _get_page_snapshot(page)
-                messages.append({'role': 'user', 'content': f'当前页面:\n{snapshot}\n\n下一步操作？'})
+                try:
+                    if act == 'navigate':
+                        url = action.get('url', '')
+                        if not url.startswith('http'):
+                            url = 'https://' + url
+                        page.goto(url, timeout=20000, wait_until='domcontentloaded')
+                        page.wait_for_timeout(1500)
+                        results.append(f'已打开: {page.url}')
 
-                # 调用 Ollama
-                resp = _call_ollama(messages, tools=_get_browser_tools())
-                choice = resp.get('choices', [{}])[0]
-                msg = choice.get('message', {})
+                    elif act == 'search':
+                        query = action.get('query', '')
+                        search_url = SEARCH_ENGINE.format(query=quote(query))
+                        page.goto(search_url, timeout=15000, wait_until='domcontentloaded')
+                        page.wait_for_timeout(2000)
+                        # 尝试提取搜索结果
+                        try:
+                            title = page.title()
+                            snippets = page.evaluate('''() => {
+                                const results = [];
+                                document.querySelectorAll('h3, .t, .result h3 a, [class*="result"] h3').forEach((el, i) => {
+                                    if (i < 5) results.push(el.textContent?.trim());
+                                });
+                                return results.filter(Boolean);
+                            }''')
+                            results.append(f'搜索 "{query}" 完成')
+                            if snippets:
+                                results.append('搜索结果:\n' + '\n'.join(f'  {i+1}. {s}' for i, s in enumerate(snippets)))
+                        except Exception:
+                            results.append(f'搜索 "{query}" 完成，页面: {page.url}')
 
-                # 处理 tool call
-                tool_calls = msg.get('tool_calls', [])
-                if tool_calls:
-                    tc = tool_calls[0]
-                    func_name = tc.get('function', {}).get('name', '')
-                    func_args = json.loads(tc.get('function', {}).get('arguments', '{}'))
+                    elif act == 'click_text':
+                        text = action.get('text', '')
+                        try:
+                            # 尝试点击包含指定文本的元素
+                            page.evaluate(f'''
+                                const text = {json.dumps(text)};
+                                const els = document.querySelectorAll('a, button, [role="button"], input[type="submit"], h3');
+                                for (const el of els) {{
+                                    if (el.textContent?.includes(text) || el.value?.includes(text)) {{
+                                        el.click();
+                                        return;
+                                    }}
+                                }}
+                            ''')
+                            page.wait_for_timeout(2000)
+                            results.append(f'已点击: {text}')
+                        except Exception:
+                            results.append(f'点击失败: {text}')
 
-                    if func_name == 'browser_action':
-                        action = func_args
-                    else:
-                        action = func_args
-                else:
-                    # 没有 tool call，用文本回复
-                    content = msg.get('content', '') or choice.get('text', '')
-                    action = {'action': 'done', 'result': content, 'reason': '模型直接回复'}
+                    elif act == 'type_text':
+                        text = action.get('text', '')
+                        try:
+                            page.evaluate(f'''
+                                const text = {json.dumps(text)};
+                                const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type]), textarea, [role="textbox"]');
+                                for (const el of inputs) {{
+                                    if (el.offsetParent !== null) {{
+                                        el.focus();
+                                        el.value = text;
+                                        el.dispatchEvent(new Event("input", {{bubbles: true}}));
+                                        return;
+                                    }}
+                                }}
+                            ''')
+                            page.wait_for_timeout(500)
+                            # 尝试提交
+                            page.evaluate('''
+                                const form = document.querySelector('form');
+                                if (form) form.submit();
+                            ''')
+                            page.wait_for_timeout(2000)
+                            results.append(f'已输入: {text}')
+                        except Exception:
+                            results.append(f'输入失败: {text}')
 
-                act = action.get('action', 'done')
-                reason = action.get('reason', '')
-                logger.info(f'[任务 {task_id}] 步骤 {step + 1}: {act} - {reason}')
+                    elif act == 'extract':
+                        page.wait_for_timeout(1000)
+                        text = page.evaluate('() => document.body?.innerText?.substring(0, 3000) || ""')
+                        results.append(f'页面内容:\n{text}')
 
-                # 执行操作
-                result = _execute_action(page, browser, action)
+                    elif act == 'screenshot':
+                        page.wait_for_timeout(1000)
+                        screenshot = page.screenshot(full_page=False, type='jpeg', quality=60)
+                        import base64
+                        data_url = f'data:image/jpeg;base64,{base64.b64encode(screenshot).decode()}'
+                        # 保存截图到文件
+                        import tempfile
+                        fname = f'/opt/chatroom/uploads/screenshot_{task_id}.jpg'
+                        os.makedirs('/opt/chatroom/uploads', exist_ok=True)
+                        with open(fname, 'wb') as f:
+                            f.write(screenshot)
+                        results.append(f'截图已保存: /uploads/screenshot_{task_id}.jpg')
 
-                # 将操作结果加入对话
-                messages.append({
-                    'role': 'assistant',
-                    'content': None,
-                    'tool_calls': [{
-                        'id': f'call_{step}',
-                        'type': 'function',
-                        'function': {
-                            'name': 'browser_action',
-                            'arguments': json.dumps(action, ensure_ascii=False),
-                        }
-                    }]
-                })
-                messages.append({
-                    'role': 'tool',
-                    'tool_call_id': f'call_{step}',
-                    'content': result,
-                })
-
-                if act == 'done':
-                    final_result = action.get('result', result)
-                    break
-                elif act == 'navigate':
-                    final_result = result
-
-            if not final_result:
-                final_result = f'达到最大步骤数 ({max_steps})，当前页面: {page.url}'
+                except Exception as e:
+                    results.append(f'操作失败 ({act}): {e}')
 
             context.close()
             browser.close()
+
+        final_result = '\n\n'.join(results) if results else '无结果'
 
         with tasks_lock:
             tasks[task_id]['status'] = 'completed'
@@ -339,7 +272,7 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS_DE
 
 
 def _notify_callback(task_id: str, status: str, result: str):
-    """通知 Node.js 后端任务结果"""
+    """通知 Node.js 后端"""
     import urllib.request
     try:
         data = json.dumps({
@@ -383,8 +316,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._send_json({
                 'status': 'ok',
                 'tasks_count': len(tasks),
-                'model': OLLAMA_MODEL,
-                'ollama': OLLAMA_BASE,
+                'engine': 'playwright-direct',
+                'mode': 'lightweight-command-parser',
             })
 
         elif parsed.path.startswith('/status/'):
@@ -404,10 +337,7 @@ class AgentHandler(BaseHTTPRequestHandler):
         elif parsed.path == '/tasks':
             with tasks_lock:
                 task_list = {
-                    tid: {
-                        'status': t['status'],
-                        'task': t['task'][:100],
-                    }
+                    tid: {'status': t['status'], 'task': t['task'][:100]}
                     for tid, t in tasks.items()
                 }
             self._send_json({'tasks': task_list})
@@ -428,7 +358,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                 return
 
             task_desc = data.get('task', '')
-            max_steps = data.get('max_steps', MAX_STEPS_DEFAULT)
+            max_steps = data.get('max_steps', MAX_STEPS)
             user_id = data.get('user_id', '')
             source = data.get('source', 'chat')
             target_id = data.get('target_id', '')
@@ -458,7 +388,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._send_json({
                 'task_id': task_id,
                 'status': 'pending',
-                'message': '任务已接收，正在执行...',
+                'message': '任务已接收',
             })
 
         elif parsed.path == '/stop':
@@ -484,22 +414,8 @@ class AgentHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    # 检查 Ollama 是否可用
-    try:
-        import urllib.request
-        req = urllib.request.Request(f'{OLLAMA_BASE}/api/tags')
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read())
-            models = [m['name'] for m in data.get('models', [])]
-            logger.info(f'Ollama 已连接，可用模型: {models}')
-            if OLLAMA_MODEL not in models and not any(OLLAMA_MODEL in m for m in models):
-                logger.warning(f'⚠ 模型 {OLLAMA_MODEL} 未找到，请先运行: ollama pull {OLLAMA_MODEL}')
-    except Exception as e:
-        logger.warning(f'⚠ 无法连接 Ollama ({OLLAMA_BASE}): {e}')
-        logger.warning('请确保 Ollama 已安装并启动: curl -fsSL https://ollama.com/install.sh | sh')
-
     server = HTTPServer(('0.0.0.0', PORT), AgentHandler)
-    logger.info(f'轻量 Browser Agent 已启动，端口: {PORT}，模型: {OLLAMA_MODEL}')
+    logger.info(f'轻量浏览器代理已启动，端口: {PORT} (命令解析模式，零 LLM 依赖)')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
