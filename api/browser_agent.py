@@ -138,8 +138,10 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
             _notify_callback(task_id, 'failed', '无法解析任务命令')
             return
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=[
+        pw = sync_playwright().start()
+        browser = None
+        try:
+            browser = pw.chromium.launch(headless=True, args=[
                 '--no-sandbox', '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage', '--disable-gpu',
                 '--single-process',
@@ -169,26 +171,51 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
                         search_url = SEARCH_ENGINE.format(query=quote(query))
                         page.goto(search_url, timeout=15000, wait_until='domcontentloaded')
                         page.wait_for_timeout(2000)
-                        # 尝试提取搜索结果
+                        # 提取搜索结果（标题+摘要+链接）
                         try:
-                            title = page.title()
-                            snippets = page.evaluate('''() => {
-                                const results = [];
-                                document.querySelectorAll('h3, .t, .result h3 a, [class*="result"] h3').forEach((el, i) => {
-                                    if (i < 5) results.push(el.textContent?.trim());
+                            search_items = page.evaluate('''() => {
+                                const items = [];
+                                // 百度搜索结果
+                                const containers = document.querySelectorAll('.result, .c-container, [class*="result"]');
+                                containers.forEach((c, i) => {
+                                    if (i >= 5) return;
+                                    const title = c.querySelector('h3 a, h3, .t a')?.textContent?.trim() || '';
+                                    const snippet = c.querySelector('.c-abstract, .c-span-last, [class*="abstract"], [class*="summary"]')?.textContent?.trim() || '';
+                                    const link = c.querySelector('a[href*="http"]')?.href || '';
+                                    if (title) {
+                                        items.push({title, snippet: snippet.substring(0, 200), link});
+                                    }
                                 });
-                                return results.filter(Boolean);
+                                // 通用fallback
+                                if (items.length === 0) {
+                                    document.querySelectorAll('h3').forEach((h, i) => {
+                                        if (i >= 5) return;
+                                        const p = h.nextElementSibling;
+                                        const snippet = p?.textContent?.trim()?.substring(0, 200) || '';
+                                        const link = h.querySelector('a')?.href || h.closest('a')?.href || '';
+                                        items.push({title: h.textContent?.trim(), snippet, link});
+                                    });
+                                }
+                                return items;
                             }''')
                             results.append(f'搜索 "{query}" 完成')
-                            if snippets:
-                                results.append('搜索结果:\n' + '\n'.join(f'  {i+1}. {s}' for i, s in enumerate(snippets)))
-                        except Exception:
+                            if search_items:
+                                items_text = []
+                                for idx, item in enumerate(search_items):
+                                    items_text.append(f'{idx+1}. {item["title"]}')
+                                    if item['snippet']:
+                                        items_text.append(f'   {item["snippet"]}')
+                                    if item['link']:
+                                        items_text.append(f'   {item["link"]}')
+                                results.append('搜索结果:\n' + '\n'.join(items_text))
+                            else:
+                                results.append(f'页面: {page.url}')
+                        except Exception as e:
                             results.append(f'搜索 "{query}" 完成，页面: {page.url}')
 
                     elif act == 'click_text':
                         text = action.get('text', '')
                         try:
-                            # 尝试点击包含指定文本的元素
                             page.evaluate(f'''
                                 const text = {json.dumps(text)};
                                 const els = document.querySelectorAll('a, button, [role="button"], input[type="submit"], h3');
@@ -220,7 +247,6 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
                                 }}
                             ''')
                             page.wait_for_timeout(500)
-                            # 尝试提交
                             page.evaluate('''
                                 const form = document.querySelector('form');
                                 if (form) form.submit();
@@ -239,9 +265,6 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
                         page.wait_for_timeout(1000)
                         screenshot = page.screenshot(full_page=False, type='jpeg', quality=60)
                         import base64
-                        data_url = f'data:image/jpeg;base64,{base64.b64encode(screenshot).decode()}'
-                        # 保存截图到文件
-                        import tempfile
                         fname = f'/opt/chatroom/uploads/screenshot_{task_id}.jpg'
                         os.makedirs('/opt/chatroom/uploads', exist_ok=True)
                         with open(fname, 'wb') as f:
@@ -253,6 +276,16 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
 
             context.close()
             browser.close()
+        finally:
+            try:
+                if browser:
+                    browser.close()
+            except Exception:
+                pass
+            try:
+                pw.stop()
+            except Exception:
+                pass
 
         final_result = '\n\n'.join(results) if results else '无结果'
 
