@@ -304,7 +304,7 @@ router.delete('/:id', authMiddleware, (req: Request, res: Response): void => {
       const officialName = (req as any).user.username || '官方'
       stmtCache
         .get('INSERT INTO notifications (userId, type, postId, commentId, fromUserId, content, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(post.userId, 'system', null, null, userId, `你的动态「${preview}」被${officialName}删除`, now)
+        .run(post.userId, 'system', 0, null, userId, `你的动态「${preview}」被${officialName}删除`, now)
       emitToUser(post.userId, 'new_notification', {
         postId: null,
         fromUserId: userId,
