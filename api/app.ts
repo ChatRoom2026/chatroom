@@ -13,6 +13,7 @@ import zlib from 'zlib'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { execSync } from 'child_process'
 
 import authRoutes from './routes/auth.js'
 import friendsRoutes from './routes/friends.js'
@@ -197,12 +198,31 @@ app.post('/api/deploy', (req: Request, res: Response) => {
     res.status(403).json({ success: false, error: '密钥错误' })
     return
   }
-  const { execSync } = require('child_process')
   try {
     const out = execSync('cd /opt/chatroom && git pull origin master && npx vite build && pm2 restart chatroom --update-env', { encoding: 'utf-8', timeout: 120000 })
     res.json({ success: true, output: out })
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+// 管理终端：远程执行命令（仅通过密钥验证）
+app.post('/api/admin/exec', (req: Request, res: Response) => {
+  const secret = req.headers['x-deploy-secret'] || req.body?.secret
+  if (secret !== 'chatroom2026') {
+    res.status(403).json({ success: false, error: '密钥错误' })
+    return
+  }
+  const cmd = req.body?.cmd
+  if (!cmd || typeof cmd !== 'string') {
+    res.status(400).json({ success: false, error: '缺少 cmd 参数' })
+    return
+  }
+  try {
+    const out = execSync(cmd, { encoding: 'utf-8', timeout: 30000, maxBuffer: 10 * 1024 * 1024 })
+    res.json({ success: true, output: out })
+  } catch (err: any) {
+    res.json({ success: false, error: err.message, output: err.stdout || '', stderr: err.stderr || '' })
   }
 })
 
