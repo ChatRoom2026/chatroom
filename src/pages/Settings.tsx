@@ -78,6 +78,8 @@ export default function Settings() {
   // 定位相关
   const [locLoadingByIp, setLocLoadingByIp] = useState(false)
   const [locMessage, setLocMessage] = useState('')
+  const [regionLocked, setRegionLocked] = useState(false) // 自动定位后锁定
+  const [locLoadingByGps, setLocLoadingByGps] = useState(false)
 
   // 修改密码相关
   const [verifyMethod, setVerifyMethod] = useState<'old_password' | 'email_code' | 'face'>('old_password')
@@ -130,9 +132,16 @@ export default function Settings() {
           setUsername(res.user.username || '')
           setBio(res.user.bio || '')
           setGender((res.user.gender as Gender) || '')
-          setRegion(res.user.region || '')
+          const savedRegion = res.user.region || ''
+          setRegion(savedRegion)
           setAge(res.user.age ? String(res.user.age) : '')
           setAvatar(res.user.avatar || '')
+          // 如果用户没有设置地区，自动定位
+          if (!savedRegion) {
+            await autoLocate()
+          } else {
+            setRegionLocked(true)
+          }
         }
       } catch (err: any) {
         if (!cancelled) setError(err.message)
@@ -186,23 +195,81 @@ export default function Settings() {
     }
   }
 
-  // ========== 自动定位：直接使用 IP 归属地（返回中文城市名） ==========
-  async function handleAutoLocate() {
+  // ========== 自动定位：IP 归属地 + 浏览器 GPS 双重定位 ==========
+  async function autoLocate() {
     setLocMessage('')
     setLocLoadingByIp(true)
     try {
       const res = await api.getLocationByIp()
       if (res.success) {
-        setRegion(res.location || '')
-        setLocMessage(res.isPrivate ? `⚠ 当前 IP ${res.ip} 为内网环境，无法自动定位，请手动输入地区` : `✓ 已通过 IP 归属地定位：${res.location}`)
-      } else {
-        setLocMessage('⚠ IP 归属地查询失败，请手动输入地区')
+        const loc = res.location || ''
+        if (loc && !res.isPrivate) {
+          setRegion(loc)
+          setRegionLocked(true)
+          setLocMessage(`✓ 已自动定位：${loc}`)
+          // 同时尝试浏览器 GPS 精确定位（静默，不阻塞）
+          tryGpsLocate()
+          return
+        }
+      }
+      // IP 定位失败，尝试 GPS
+      setLocMessage('⚠ IP 定位失败，正在尝试 GPS 定位...')
+      await tryGpsLocate()
+      if (!locMessage) {
+        setLocMessage('⚠ 无法自动定位，请手动输入地区')
       }
     } catch (err: any) {
-      setLocMessage(`⚠ IP 归属地查询失败：${err.message || '网络异常'}`)
+      setLocMessage(`⚠ 定位失败：${err.message || '网络异常'}`)
     } finally {
       setLocLoadingByIp(false)
     }
+  }
+
+  async function tryGpsLocate() {
+    if (!navigator.geolocation) return
+    setLocLoadingByGps(true)
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 8000,
+          maximumAge: 0,
+        })
+      })
+      const { latitude, longitude } = pos.coords
+      // 使用 Nominatim 反向地理编码（免费，无需 key）
+      const resp = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=12&accept-language=zh`,
+        { headers: { 'User-Agent': 'ChatRoom/1.0' } }
+      )
+      const data = await resp.json()
+      if (data?.address) {
+        const addr = data.address
+        // 优先取区县/乡镇级别，如 "宁乡"、"桂东"
+        const district = addr.county || addr.town || addr.village || addr.city_district || ''
+        const city = addr.city || addr.state_district || ''
+        const province = addr.state || addr.province || ''
+        const parts: string[] = []
+        if (province) parts.push(province.replace(/省|市|自治区|特别行政区/g, ''))
+        if (city && city !== province && !city.includes(province.replace(/省|市|自治区|特别行政区/g, ''))) parts.push(city)
+        if (district && district !== city) parts.push(district)
+        if (parts.length >= 2) {
+          const gpsLoc = parts.join(' · ')
+          setRegion(gpsLoc)
+          setRegionLocked(true)
+          setLocMessage(`✓ GPS 精确定位：${gpsLoc}`)
+        }
+      }
+    } catch {
+      // GPS 定位失败，静默
+    } finally {
+      setLocLoadingByGps(false)
+    }
+  }
+
+  function handleAutoLocate() {
+    setRegionLocked(false)
+    autoLocate()
   }
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -571,30 +638,52 @@ export default function Settings() {
               <label className="text-xs text-gray-400 mb-1.5 block flex items-center gap-1">
                 <MapPin className="w-3 h-3" />
                 地区
+                {regionLocked && <span className="text-emerald-400 text-[10px]">(自动定位)</span>}
               </label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={region}
                   onChange={(e) => setRegion(e.target.value)}
-                  className="flex-1 px-4 py-2.5 bg-[#0F172A] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-                  placeholder="例如：北京 / 上海"
+                  className={`flex-1 px-4 py-2.5 bg-[#0F172A] border rounded-lg text-white placeholder-gray-500 focus:outline-none transition-colors ${
+                    regionLocked ? 'border-emerald-500/30 text-emerald-300 cursor-default' : 'border-gray-700 focus:border-blue-500'
+                  }`}
+                  placeholder={regionLocked ? '' : '例如：北京 / 上海'}
                   maxLength={30}
+                  readOnly={regionLocked}
                 />
-                <button
-                  type="button"
-                  onClick={handleAutoLocate}
-                  disabled={locLoadingByIp}
-                  title="自动定位"
-                  className="px-3 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1 text-xs disabled:opacity-50"
-                >
-                  {locLoadingByIp && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <Navigation className="w-4 h-4" />
-                  自动定位
-                </button>
+                {regionLocked ? (
+                  <button
+                    type="button"
+                    onClick={() => setRegionLocked(false)}
+                    title="手动修改"
+                    className="px-3 py-2.5 bg-yellow-600/20 hover:bg-yellow-600/30 border border-yellow-500/30 text-yellow-300 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1 text-xs"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    修改
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAutoLocate}
+                    disabled={locLoadingByIp}
+                    title="自动定位"
+                    className="px-3 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1 text-xs disabled:opacity-50"
+                  >
+                    {locLoadingByIp && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <Navigation className="w-4 h-4" />
+                    重新定位
+                  </button>
+                )}
               </div>
               {locMessage && (
-                <p className={`text-xs mt-1 ${locMessage.startsWith('✓') ? 'text-emerald-400' : 'text-yellow-400'}`}>{locMessage}</p>
+                <p className={`text-xs mt-1 ${locMessage.startsWith('✓') ? 'text-emerald-400' : locMessage.startsWith('⚠') ? 'text-yellow-400' : 'text-yellow-400'}`}>{locMessage}</p>
+              )}
+              {locLoadingByGps && (
+                <p className="text-xs text-blue-400 mt-1 flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  正在获取 GPS 精确定位...
+                </p>
               )}
             </div>
 

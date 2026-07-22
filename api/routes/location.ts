@@ -19,13 +19,13 @@ import { authMiddleware } from '../middleware/auth.js'
 const router = Router()
 
 // ---------- IP -> 归属地（http 调用 ip-api.com，失败回落到空） ----------
-function lookupIpLocation(ip: string): Promise<{ country?: string; regionName?: string; city?: string; isp?: string } | null> {
+function lookupIpLocation(ip: string): Promise<{ country?: string; regionName?: string; city?: string; district?: string; isp?: string } | null> {
   return new Promise((resolve) => {
     try {
       const req = http.get(
         {
           host: 'ip-api.com',
-          path: `/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city,isp&lang=zh-CN`,
+          path: `/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city,district,isp,lat,lon&lang=zh-CN`,
           timeout: 3000,
         },
         (res) => {
@@ -35,7 +35,7 @@ function lookupIpLocation(ip: string): Promise<{ country?: string; regionName?: 
             try {
               const data = JSON.parse(buf)
               if (data.status === 'success') {
-                resolve({ country: data.country, regionName: data.regionName, city: data.city, isp: data.isp })
+                resolve({ country: data.country, regionName: data.regionName, city: data.city, district: data.district, isp: data.isp })
               } else {
                 resolve(null)
               }
@@ -69,12 +69,18 @@ function extractClientIp(req: Request): string {
   return sock
 }
 
-// 工具：把 (country, regionName, city) 拼成简短中文/英文名
-function formatLocation(info: { country?: string; regionName?: string; city?: string }): string {
+// 工具：把 (country, regionName, city, district) 拼成简短的定位字符串
+// 优先展示最精确的区县级别，如 "宁乡"、"桂东"、"郴州"
+function formatLocation(info: { country?: string; regionName?: string; city?: string; district?: string }): string {
   const parts: string[] = []
   if (info.country) parts.push(info.country)
-  if (info.regionName && info.regionName !== info.country) parts.push(info.regionName)
-  if (info.city && info.city !== info.regionName) parts.push(info.city)
+  if (info.regionName && info.regionName !== info.country) parts.push(info.regionName.replace(/省|市|自治区|特别行政区/g, ''))
+  // 优先展示 district（区县级），如果 district 和 city 同名则只展示一个
+  if (info.district && info.district !== info.city) {
+    parts.push(info.district)
+  } else if (info.city && info.city !== info.regionName) {
+    parts.push(info.city)
+  }
   return parts.join(' · ')
 }
 
