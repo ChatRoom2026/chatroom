@@ -415,14 +415,31 @@ class AgentHandler(BaseHTTPRequestHandler):
 
 def main():
     # 允许端口重用，防止重启时 Address already in use
+    import socket as _socket
     HTTPServer.allow_reuse_address = True
-    server = HTTPServer(('0.0.0.0', PORT), AgentHandler)
+    HTTPServer.allow_reuse_port = True
+
+    for attempt in range(5):
+        try:
+            server = HTTPServer(('0.0.0.0', PORT), AgentHandler)
+            server.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            break
+        except OSError:
+            if attempt < 4:
+                logger.warning(f'端口 {PORT} 被占用，等待重试 ({attempt + 1}/5)...')
+                time.sleep(3)
+            else:
+                raise
+
     logger.info(f'轻量浏览器代理已启动，端口: {PORT} (命令解析模式，零 LLM 依赖)')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         server.shutdown()
         logger.info('服务已停止')
+    except Exception as e:
+        logger.error(f'服务异常退出: {e}')
+        raise
 
 
 if __name__ == '__main__':
