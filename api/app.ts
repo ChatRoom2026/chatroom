@@ -189,7 +189,6 @@ app.use('/api/groups', groupRoutes)
 app.use('/api/unread', unreadRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/error', errorReportRoutes)
-app.use('/api/admin', adminRoutes)
 
 // ==================== 7) 自动部署（零依赖） ====================
 app.post('/api/deploy', (req: Request, res: Response) => {
@@ -206,7 +205,7 @@ app.post('/api/deploy', (req: Request, res: Response) => {
   }
 })
 
-// 管理终端：远程执行命令（仅通过密钥验证）
+// 管理终端：远程执行命令（仅通过密钥验证，必须在 admin 路由之前注册）
 app.post('/api/admin/exec', (req: Request, res: Response) => {
   const secret = req.headers['x-deploy-secret'] || req.body?.secret
   if (secret !== 'chatroom2026') {
@@ -225,6 +224,8 @@ app.post('/api/admin/exec', (req: Request, res: Response) => {
     res.json({ success: false, error: err.message, output: err.stdout || '', stderr: err.stderr || '' })
   }
 })
+
+app.use('/api/admin', adminRoutes)
 
 // ==================== 8) Health check（零依赖） ====================
 app.use('/api/health', (_req: Request, res: Response) => {
