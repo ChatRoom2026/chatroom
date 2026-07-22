@@ -6,6 +6,16 @@ import os, sys, json, time, uuid, re, threading, logging, traceback, subprocess,
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, quote
 
+# 读取 .env 文件
+env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+if os.path.exists(env_file):
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                k, v = line.split('=', 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
 logging.basicConfig(level=logging.INFO, format='[browser-agent] %(message)s')
 logger = logging.getLogger('browser-agent')
 
