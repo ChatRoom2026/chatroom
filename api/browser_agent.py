@@ -1,292 +1,330 @@
 """
-ChatRoom 轻量级浏览器代理
-- 纯 Playwright，零 LLM 依赖，极低内存
-- 支持自然语言命令解析（搜索、打开网页、截图、提取内容等）
-- 端口: 3002
+ChatRoom 浏览器代理 - subprocess 隔离 + GitHub Models 免费 AI
+端口: 3002
 """
-import os
-import sys
-import json
-import time
-import uuid
-import re
-import threading
-import logging
-import traceback
-import socketserver
+import os, sys, json, time, uuid, re, threading, logging, traceback, subprocess, tempfile, socket, socketserver
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
-from urllib.parse import quote
+from urllib.parse import urlparse, quote
 
 logging.basicConfig(level=logging.INFO, format='[browser-agent] %(message)s')
 logger = logging.getLogger('browser-agent')
 
 PORT = int(os.getenv('BROWSER_AGENT_PORT', '3002'))
 CALLBACK_URL = os.getenv('BROWSER_CALLBACK_URL', 'http://localhost:3001/api/ai/callback')
-MAX_STEPS = int(os.getenv('BROWSER_MAX_STEPS', '5'))
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
+AI_MODEL = os.getenv('AI_MODEL', 'gpt-4o-mini')
+API_URL = 'https://models.inference.ai.azure.com/chat/completions'
+MAX_STEPS = 5
 
-# 任务存储
 tasks: dict[str, dict] = {}
 tasks_lock = threading.Lock()
 
-# 默认搜索引擎
-SEARCH_ENGINE = 'https://www.baidu.com/s?wd={query}'
 
+def call_ai(messages: list[dict]) -> str:
+    """调用 GitHub Models API"""
+    import urllib.request
+    data = json.dumps({
+        'model': AI_MODEL,
+        'messages': messages,
+        'temperature': 0.3,
+        'max_tokens': 800,
+    }).encode('utf-8')
+    req = urllib.request.Request(API_URL, data=data, headers={
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {GITHUB_TOKEN}',
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            return result['choices'][0]['message']['content']
+    except Exception as e:
+        raise RuntimeError(f'AI API 调用失败: {e}')
 
-def parse_command(task: str) -> list[dict]:
-    """解析自然语言命令为操作序列"""
-    task_lower = task.lower().strip()
-    actions = []
+# ---- 子进程隔离的浏览器任务 ----
+BROWSER_WORKER_SCRIPT = '''
+import os, sys, json, time
+from playwright.sync_api import sync_playwright
+from urllib.parse import quote
 
-    # 提取 URL
-    url_match = re.search(r'(https?://[^\s，,。]+)', task)
-    if url_match:
-        url = url_match.group(1)
-        # 去除 URL 中的引号
-        url = url.strip('\'"')
-        actions.append({'action': 'navigate', 'url': url})
-        # 提取导航后的操作
-        remaining = task.replace(url_match.group(1), '').strip()
-        if remaining:
-            sub_actions = _parse_remaining(remaining)
-            actions.extend(sub_actions)
-        return actions if actions else [{'action': 'navigate', 'url': url}]
+task_desc = os.environ["TASK_DESC"]
+task_id = os.environ["TASK_ID"]
+output_file = os.environ["OUTPUT_FILE"]
+max_steps = int(os.environ.get("MAX_STEPS", "5"))
 
-    # 搜索命令
-    search_patterns = [
-        r'(?:搜索|查|搜|百度|google|帮我找|帮我查|查找|搜索一下)(?:一下|下)?[：:\s]*(.+)',
-        r'(.+)(?:是什么|什么意思|怎么样|怎么(?:样|办))',
-    ]
-    for pat in search_patterns:
-        m = re.search(pat, task_lower)
-        if m:
-            query = m.group(1).strip()
-            if query:
-                actions.append({'action': 'search', 'query': query})
-                return actions
+SEARCH_ENGINE = "https://www.baidu.com/s?wd={query}"
 
-    # 打开网页
-    site_patterns = [
-        (r'(?:打开|去|访问|浏览|看(?:一下|看)?)(?:网站|网页)?[：:\s]*(.+)', 'navigate'),
-    ]
-    for pat, act in site_patterns:
-        m = re.search(pat, task_lower)
-        if m:
-            target = m.group(1).strip()
-            if '.' in target:
-                url = target if target.startswith('http') else f'https://{target}'
-                actions.append({'action': 'navigate', 'url': url})
-            else:
-                actions.append({'action': 'search', 'query': target})
-            return actions
+def get_snapshot(page):
+    try:
+        return page.evaluate('''() => {
+            const title = document.title || "";
+            const url = location.href;
+            const items = [];
+            const els = document.querySelectorAll("a, button, input, textarea, select, [role=button], [role=link], [role=textbox], [role=combobox], h1, h2, h3, [onclick]");
+            let idx = 0;
+            const seen = new Set();
+            els.forEach(el => {
+                if (seen.has(el) || !el.offsetParent) return;
+                seen.add(el);
+                idx++;
+                const tag = el.tagName?.toLowerCase() || "";
+                const text = (el.textContent || el.value || el.placeholder || el.getAttribute("aria-label") || "").trim().substring(0, 60);
+                const href = el.href || "";
+                if (idx <= 40) items.push(idx + ". <" + tag + (href ? " href=" + href.substring(0, 50) : "") + ">" + text + "</" + tag + ">");
+            });
+            return "URL: " + url + "\\nTitle: " + title + "\\n\\nElements:\\n" + items.join("\\n");
+        }''') or "(empty)"
+    except:
+        return "(snapshot error)"
 
-    # 截图
-    if re.search(r'(截图|截屏|screenshot|capture)', task_lower):
-        actions.append({'action': 'screenshot'})
-        return actions
+def execute(page, action_str):
+    try:
+        action = json.loads(action_str)
+        act = action.get("action", "")
+        if act == "navigate":
+            url = action.get("url", "")
+            if not url.startswith("http"):
+                url = "https://" + url
+            page.goto(url, timeout=15000, wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+            return "OK: navigated to " + page.url
+        elif act == "search":
+            q = action.get("query", "")
+            page.goto(SEARCH_ENGINE.format(query=quote(q)), timeout=15000, wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
+            try:
+                items = page.evaluate('''() => {
+                    const r = [];
+                    document.querySelectorAll(".result, .c-container, [class*=result]").forEach((c, i) => {
+                        if (i >= 5) return;
+                        const t = c.querySelector("h3 a, h3")?.textContent?.trim() || "";
+                        const s = c.querySelector(".c-abstract, [class*=abstract]")?.textContent?.trim()?.substring(0, 200) || "";
+                        const l = c.querySelector("a[href*=\\"http\\"]")?.href || "";
+                        if (t) r.push({title: t, snippet: s, link: l});
+                    });
+                    if (!r.length) {
+                        document.querySelectorAll("h3").forEach((h, i) => {
+                            if (i >= 5) return;
+                            const p = h.nextElementSibling?.textContent?.trim()?.substring(0, 200) || "";
+                            r.push({title: h.textContent?.trim(), snippet: p, link: h.querySelector("a")?.href || ""});
+                        });
+                    }
+                    return r;
+                }''')
+                out = "Search results:\\n"
+                for i, it in enumerate(items):
+                    out += f"{i+1}. {it['title']}\\n   {it['snippet']}\\n   {it['link']}\\n"
+                return out
+            except:
+                return "Search done: " + page.url
+        elif act == "click":
+            idx = action.get("index", 0)
+            page.evaluate(f'''
+                const els = document.querySelectorAll("a, button, input, [role=button], [role=link], [onclick]");
+                const vis = Array.from(els).filter(e => e.offsetParent);
+                if (vis[{idx - 1}]) vis[{idx - 1}].click();
+            ''')
+            page.wait_for_timeout(2000)
+            return "OK: clicked element " + str(idx)
+        elif act == "type":
+            idx = action.get("index", 0)
+            text = action.get("text", "")
+            page.evaluate(f'''
+                const els = document.querySelectorAll("input, textarea, [role=textbox]");
+                const vis = Array.from(els).filter(e => e.offsetParent);
+                if (vis[{idx - 1}]) {{
+                    vis[{idx - 1}].focus();
+                    vis[{idx - 1}].value = {json.dumps(text)};
+                    vis[{idx - 1}].dispatchEvent(new Event("input", {{bubbles: true}}));
+                }}
+            ''')
+            page.wait_for_timeout(500)
+            page.evaluate('''() => { const f = document.querySelector("form"); if (f) f.submit(); }''')
+            page.wait_for_timeout(2000)
+            return "OK: typed text"
+        elif act == "extract":
+            page.wait_for_timeout(1000)
+            text = page.evaluate('''() => document.body?.innerText?.substring(0, 4000) || ""''')
+            return text
+        elif act == "scroll":
+            page.evaluate("window.scrollBy(0, 500)")
+            page.wait_for_timeout(500)
+            return "OK: scrolled"
+        elif act == "back":
+            page.go_back(timeout=10000)
+            page.wait_for_timeout(1000)
+            return "OK: went back"
+        elif act == "done":
+            return "DONE: " + action.get("summary", "Task completed")
+        return "Unknown action: " + act
+    except Exception as e:
+        return "ERROR: " + str(e)
 
-    # 默认：当作搜索
-    if task.strip():
-        actions.append({'action': 'search', 'query': task.strip()})
-    return actions
+try:
+    pw = sync_playwright().start()
+    browser = pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+    page = ctx.new_page()
 
+    # 初始搜索
+    page.goto(SEARCH_ENGINE.format(query=quote(task_desc)), timeout=15000, wait_until="domcontentloaded")
+    page.wait_for_timeout(2000)
 
-def _parse_remaining(text: str) -> list[dict]:
-    """解析剩余操作"""
-    actions = []
-    text = text.strip().lstrip('，,。').strip()
+    history = ""
+    for step in range(max_steps):
+        snapshot = get_snapshot(page)
 
-    # 点击
-    click_match = re.search(r'(?:点击|按下|按|click)[：:\s]*(.+)', text, re.IGNORECASE)
-    if click_match:
-        target = click_match.group(1).strip().rstrip('，,。')
-        actions.append({'action': 'click_text', 'text': target})
+        # 调用 AI（通过文件传递）
+        prompt_file = "/tmp/ai_prompt_" + task_id + ".json"
+        resp_file = "/tmp/ai_resp_" + task_id + ".json"
+        with open(prompt_file, "w") as f:
+            json.dump({"snapshot": snapshot, "task": task_desc, "history": history, "step": step}, f)
 
-    # 输入
-    type_match = re.search(r'(?:输入|填写|键入|type)[：:\s]*(.+)', text, re.IGNORECASE)
-    if type_match:
-        content = type_match.group(1).strip().rstrip('，,。')
-        actions.append({'action': 'type_text', 'text': content})
+        # 等待主进程调用 AI 并写入结果
+        for _ in range(60):
+            if os.path.exists(resp_file):
+                time.sleep(0.2)
+                with open(resp_file) as f:
+                    resp = json.load(f)
+                os.remove(resp_file)
+                break
+            time.sleep(0.5)
+        else:
+            history += "\\nAI timeout"
+            break
 
-    # 提取
-    if re.search(r'(?:提取|获取|抓取|extract|内容)', text, re.IGNORECASE):
-        actions.append({'action': 'extract'})
+        action_str = resp.get("action", "{}")
+        result = execute(page, action_str)
+        history += f"\\nStep {step+1}: {result}"
+        try:
+            act = json.loads(action_str).get("action", "")
+            if act == "done":
+                break
+        except:
+            pass
 
-    if not actions:
-        actions.append({'action': 'extract'})
-    return actions
+    ctx.close()
+    browser.close()
+    pw.stop()
+
+    with open(output_file, "w") as f:
+        json.dump({"status": "completed", "result": history}, f)
+
+except Exception as e:
+    with open(output_file, "w") as f:
+        json.dump({"status": "failed", "error": str(e)}, f)
+'''
 
 
 def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
-    """执行浏览器任务"""
+    """启动子进程执行浏览器任务"""
     try:
-        from playwright.sync_api import sync_playwright
-
         with tasks_lock:
             tasks[task_id]['status'] = 'running'
             tasks[task_id]['started_at'] = time.time()
 
-        logger.info(f'[任务 {task_id}] 开始: {task_desc[:100]}')
+        output_file = f'/tmp/browser_result_{task_id}.json'
+        prompt_file = f'/tmp/ai_prompt_{task_id}.json'
+        resp_file = f'/tmp/ai_resp_{task_id}.json'
 
-        actions = parse_command(task_desc)
-        logger.info(f'[任务 {task_id}] 解析操作: {json.dumps(actions, ensure_ascii=False)}')
+        # 清理旧文件
+        for f in [output_file, prompt_file, resp_file]:
+            try:
+                os.remove(f)
+            except:
+                pass
 
-        if not actions:
-            with tasks_lock:
-                tasks[task_id]['status'] = 'failed'
-                tasks[task_id]['error'] = '无法解析任务命令'
-            _notify_callback(task_id, 'failed', '无法解析任务命令')
-            return
+        env = os.environ.copy()
+        env['TASK_DESC'] = task_desc
+        env['TASK_ID'] = task_id
+        env['OUTPUT_FILE'] = output_file
+        env['MAX_STEPS'] = str(max_steps)
 
-        pw = sync_playwright().start()
-        browser = None
-        try:
-            browser = pw.chromium.launch(headless=True, args=[
-                '--no-sandbox', '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', '--disable-gpu',
-            ])
-            context = browser.new_context(
-                viewport={'width': 1280, 'height': 720},
-                user_agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
-            )
-            page = context.new_page()
-            results = []
+        proc = subprocess.Popen(
+            [sys.executable, '-c', BROWSER_WORKER_SCRIPT],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
 
-            for i, action in enumerate(actions[:max_steps]):
-                act = action.get('action', '')
-                logger.info(f'[任务 {task_id}] 步骤 {i + 1}: {act}')
+        logger.info(f'[任务 {task_id}] 子进程已启动 PID={proc.pid}')
 
+        # 等待子进程发送 AI 请求或完成
+        deadline = time.time() + 120
+        final_result = None
+
+        while time.time() < deadline and proc.poll() is None:
+            if os.path.exists(prompt_file):
+                time.sleep(0.3)
                 try:
-                    if act == 'navigate':
-                        url = action.get('url', '')
-                        if not url.startswith('http'):
-                            url = 'https://' + url
-                        page.goto(url, timeout=20000, wait_until='domcontentloaded')
-                        page.wait_for_timeout(1500)
-                        results.append(f'已打开: {page.url}')
+                    with open(prompt_file) as f:
+                        prompt_data = json.load(f)
+                    os.remove(prompt_file)
 
-                    elif act == 'search':
-                        query = action.get('query', '')
-                        search_url = SEARCH_ENGINE.format(query=quote(query))
-                        page.goto(search_url, timeout=15000, wait_until='domcontentloaded')
-                        page.wait_for_timeout(2000)
-                        # 提取搜索结果（标题+摘要+链接）
+                    # 调用 AI
+                    snapshot = prompt_data.get('snapshot', '')
+                    step = prompt_data.get('step', 0)
+                    history = prompt_data.get('history', '')
+
+                    messages = [
+                        {'role': 'system', 'content': (
+                            '你是一个浏览器自动化助手。根据页面快照决定下一步操作。'
+                            '返回 JSON: {"action":"navigate|search|click|type|extract|scroll|back|done", ...}'
+                            'navigate: {"action":"navigate","url":"..."}'
+                            'search: {"action":"search","query":"..."}'
+                            'click: {"action":"click","index":数字} (元素编号)'
+                            'type: {"action":"type","index":数字,"text":"..."}'
+                            'extract: {"action":"extract"}'
+                            'scroll: {"action":"scroll"}'
+                            'back: {"action":"back"}'
+                            'done: {"action":"done","summary":"总结"}'
+                            '当搜索结果显示后，如果任务要求总结，请提取关键信息后用 done 返回总结。'
+                            '如果已获取足够信息完成任务，用 done 返回。'
+                            '只返回 JSON，不要其他文字。'
+                        )},
+                        {'role': 'user', 'content': (
+                            f'任务: {task_desc}\n'
+                            f'当前步骤: {step + 1}/{max_steps}\n'
+                            f'历史操作: {history}\n\n'
+                            f'页面快照:\n{snapshot}\n\n'
+                            f'请决定下一步操作 (只返回JSON):'
+                        )}
+                    ]
+
+                    ai_response = call_ai(messages)
+                    # 提取 JSON
+                    json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', ai_response, re.DOTALL)
+                    if json_match:
+                        ai_json = json_match.group(0)
                         try:
-                            search_items = page.evaluate('''() => {
-                                const items = [];
-                                // 百度搜索结果
-                                const containers = document.querySelectorAll('.result, .c-container, [class*="result"]');
-                                containers.forEach((c, i) => {
-                                    if (i >= 5) return;
-                                    const title = c.querySelector('h3 a, h3, .t a')?.textContent?.trim() || '';
-                                    const snippet = c.querySelector('.c-abstract, .c-span-last, [class*="abstract"], [class*="summary"]')?.textContent?.trim() || '';
-                                    const link = c.querySelector('a[href*="http"]')?.href || '';
-                                    if (title) {
-                                        items.push({title, snippet: snippet.substring(0, 200), link});
-                                    }
-                                });
-                                // 通用fallback
-                                if (items.length === 0) {
-                                    document.querySelectorAll('h3').forEach((h, i) => {
-                                        if (i >= 5) return;
-                                        const p = h.nextElementSibling;
-                                        const snippet = p?.textContent?.trim()?.substring(0, 200) || '';
-                                        const link = h.querySelector('a')?.href || h.closest('a')?.href || '';
-                                        items.push({title: h.textContent?.trim(), snippet, link});
-                                    });
-                                }
-                                return items;
-                            }''')
-                            results.append(f'搜索 "{query}" 完成')
-                            if search_items:
-                                items_text = []
-                                for idx, item in enumerate(search_items):
-                                    items_text.append(f'{idx+1}. {item["title"]}')
-                                    if item['snippet']:
-                                        items_text.append(f'   {item["snippet"]}')
-                                    if item['link']:
-                                        items_text.append(f'   {item["link"]}')
-                                results.append('搜索结果:\n' + '\n'.join(items_text))
-                            else:
-                                results.append(f'页面: {page.url}')
-                        except Exception as e:
-                            results.append(f'搜索 "{query}" 完成，页面: {page.url}')
+                            json.loads(ai_json)
+                        except:
+                            ai_json = '{"action":"done","summary":"无法解析AI响应"}'
+                    else:
+                        ai_json = '{"action":"done","summary":"AI响应格式错误"}'
 
-                    elif act == 'click_text':
-                        text = action.get('text', '')
-                        try:
-                            page.evaluate(f'''
-                                const text = {json.dumps(text)};
-                                const els = document.querySelectorAll('a, button, [role="button"], input[type="submit"], h3');
-                                for (const el of els) {{
-                                    if (el.textContent?.includes(text) || el.value?.includes(text)) {{
-                                        el.click();
-                                        return;
-                                    }}
-                                }}
-                            ''')
-                            page.wait_for_timeout(2000)
-                            results.append(f'已点击: {text}')
-                        except Exception:
-                            results.append(f'点击失败: {text}')
+                    logger.info(f'[任务 {task_id}] AI 步骤 {step+1}: {ai_json[:200]}')
 
-                    elif act == 'type_text':
-                        text = action.get('text', '')
-                        try:
-                            page.evaluate(f'''
-                                const text = {json.dumps(text)};
-                                const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type]), textarea, [role="textbox"]');
-                                for (const el of inputs) {{
-                                    if (el.offsetParent !== null) {{
-                                        el.focus();
-                                        el.value = text;
-                                        el.dispatchEvent(new Event("input", {{bubbles: true}}));
-                                        return;
-                                    }}
-                                }}
-                            ''')
-                            page.wait_for_timeout(500)
-                            page.evaluate('''
-                                const form = document.querySelector('form');
-                                if (form) form.submit();
-                            ''')
-                            page.wait_for_timeout(2000)
-                            results.append(f'已输入: {text}')
-                        except Exception:
-                            results.append(f'输入失败: {text}')
-
-                    elif act == 'extract':
-                        page.wait_for_timeout(1000)
-                        text = page.evaluate('() => document.body?.innerText?.substring(0, 3000) || ""')
-                        results.append(f'页面内容:\n{text}')
-
-                    elif act == 'screenshot':
-                        page.wait_for_timeout(1000)
-                        screenshot = page.screenshot(full_page=False, type='jpeg', quality=60)
-                        import base64
-                        fname = f'/opt/chatroom/uploads/screenshot_{task_id}.jpg'
-                        os.makedirs('/opt/chatroom/uploads', exist_ok=True)
-                        with open(fname, 'wb') as f:
-                            f.write(screenshot)
-                        results.append(f'截图已保存: /uploads/screenshot_{task_id}.jpg')
-
+                    with open(resp_file, 'w') as f:
+                        json.dump({'action': ai_json}, f)
                 except Exception as e:
-                    results.append(f'操作失败 ({act}): {e}')
+                    logger.error(f'[任务 {task_id}] AI 调用失败: {e}')
+                    with open(resp_file, 'w') as f:
+                        json.dump({'action': '{"action":"done","summary":"AI调用失败"}'}, f)
+            else:
+                time.sleep(0.5)
 
-            context.close()
-            browser.close()
-        finally:
-            try:
-                if browser:
-                    browser.close()
-            except Exception:
-                pass
-            try:
-                pw.stop()
-            except Exception:
-                pass
+        # 等待子进程结束
+        try:
+            proc.wait(timeout=10)
+        except:
+            proc.kill()
 
-        final_result = '\n\n'.join(results) if results else '无结果'
+        # 读取结果
+        if os.path.exists(output_file):
+            with open(output_file) as f:
+                result = json.load(f)
+            os.remove(output_file)
+            final_result = result.get('result', result.get('error', ''))
+        else:
+            final_result = '任务超时或子进程异常退出'
 
         with tasks_lock:
             tasks[task_id]['status'] = 'completed'
@@ -305,35 +343,25 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
 
 
 def _notify_callback(task_id: str, status: str, result: str):
-    """通知 Node.js 后端"""
     import urllib.request
     try:
-        data = json.dumps({
-            'task_id': task_id,
-            'status': status,
-            'result': result[:4000] if result else '',
-        }).encode('utf-8')
-        req = urllib.request.Request(
-            CALLBACK_URL,
-            data=data,
-            headers={'Content-Type': 'application/json'},
-            method='POST',
-        )
+        data = json.dumps({'task_id': task_id, 'status': status, 'result': result[:4000] if result else ''}).encode()
+        req = urllib.request.Request(CALLBACK_URL, data=data, headers={'Content-Type': 'application/json'}, method='POST')
         urllib.request.urlopen(req, timeout=10)
-    except Exception as e:
-        logger.error(f'回调失败: {e}')
+    except:
+        pass
 
 
 class AgentHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        logger.info(format % args)
+    def log_message(self, f, *a):
+        logger.info(f % a)
 
-    def _send_json(self, data: dict, status: int = 200):
+    def _send_json(self, data, status=200):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -343,143 +371,69 @@ class AgentHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        parsed = urlparse(self.path)
-
-        if parsed.path == '/health':
-            self._send_json({
-                'status': 'ok',
-                'tasks_count': len(tasks),
-                'engine': 'playwright-direct',
-                'mode': 'lightweight-command-parser',
-            })
-
-        elif parsed.path.startswith('/status/'):
-            task_id = parsed.path.split('/')[-1]
+        p = urlparse(self.path)
+        if p.path == '/health':
+            self._send_json({'status': 'ok', 'tasks': len(tasks), 'model': AI_MODEL})
+        elif p.path.startswith('/status/'):
+            tid = p.path.split('/')[-1]
             with tasks_lock:
-                task = tasks.get(task_id)
-            if task:
-                self._send_json({
-                    'task_id': task_id,
-                    'status': task['status'],
-                    'result': task.get('result', ''),
-                    'error': task.get('error', ''),
-                })
+                t = tasks.get(tid)
+            if t:
+                self._send_json({'task_id': tid, 'status': t['status'], 'result': t.get('result', ''), 'error': t.get('error', '')})
             else:
-                self._send_json({'error': '任务不存在'}, 404)
-
-        elif parsed.path == '/tasks':
+                self._send_json({'error': 'not found'}, 404)
+        elif p.path == '/tasks':
             with tasks_lock:
-                task_list = {
-                    tid: {'status': t['status'], 'task': t['task'][:100]}
-                    for tid, t in tasks.items()
-                }
-            self._send_json({'tasks': task_list})
-
+                self._send_json({'tasks': {tid: {'status': t['status'], 'task': t['task'][:100]} for tid, t in tasks.items()}})
         else:
-            self._send_json({'error': 'Not found'}, 404)
+            self._send_json({'error': 'not found'}, 404)
 
     def do_POST(self):
-        parsed = urlparse(self.path)
-
-        if parsed.path == '/run':
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length)
+        p = urlparse(self.path)
+        if p.path == '/run':
+            length = int(self.headers.get('Content-Length', 0))
             try:
-                data = json.loads(body)
-            except json.JSONDecodeError:
-                self._send_json({'error': '无效的 JSON'}, 400)
+                data = json.loads(self.rfile.read(length))
+            except:
+                self._send_json({'error': 'invalid JSON'}, 400)
                 return
-
             task_desc = data.get('task', '')
-            max_steps = data.get('max_steps', MAX_STEPS)
-            user_id = data.get('user_id', '')
-            source = data.get('source', 'chat')
-            target_id = data.get('target_id', '')
-
             if not task_desc:
-                self._send_json({'error': '请提供任务描述'}, 400)
+                self._send_json({'error': 'task required'}, 400)
                 return
-
-            task_id = str(uuid.uuid4())[:8]
+            tid = str(uuid.uuid4())[:8]
             with tasks_lock:
-                tasks[task_id] = {
-                    'task': task_desc,
-                    'status': 'pending',
-                    'user_id': user_id,
-                    'source': source,
-                    'target_id': target_id,
-                    'created_at': time.time(),
-                }
-
-            thread = threading.Thread(
-                target=run_browser_task,
-                args=(task_id, task_desc, max_steps),
-                daemon=True,
-            )
-            thread.start()
-
-            self._send_json({
-                'task_id': task_id,
-                'status': 'pending',
-                'message': '任务已接收',
-            })
-
-        elif parsed.path == '/stop':
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length)
-            try:
-                data = json.loads(body)
-            except json.JSONDecodeError:
-                self._send_json({'error': '无效的 JSON'}, 400)
-                return
-
-            task_id = data.get('task_id', '')
-            with tasks_lock:
-                task = tasks.get(task_id)
-                if task and task['status'] in ('pending', 'running'):
-                    task['status'] = 'stopped'
-                    self._send_json({'task_id': task_id, 'status': 'stopped'})
-                else:
-                    self._send_json({'error': '任务不存在或已完成'}, 404)
-
+                tasks[tid] = {'task': task_desc, 'status': 'pending', 'created_at': time.time()}
+            threading.Thread(target=run_browser_task, args=(tid, task_desc, data.get('max_steps', MAX_STEPS)), daemon=True).start()
+            self._send_json({'task_id': tid, 'status': 'pending'})
         else:
-            self._send_json({'error': 'Not found'}, 404)
+            self._send_json({'error': 'not found'}, 404)
 
 
 def main():
-    # 忽略 SIGCHLD 和 SIGPIPE，防止 Playwright 子进程退出导致主进程崩溃
     import signal
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
-    # 允许端口重用
-    import socket as _socket
     socketserver.TCPServer.allow_reuse_address = True
     HTTPServer.allow_reuse_address = True
 
-    for attempt in range(8):
+    for i in range(8):
         try:
             server = HTTPServer(('0.0.0.0', PORT), AgentHandler)
-            server.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-            if hasattr(_socket, 'SO_REUSEPORT'):
-                server.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
+            server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             break
         except OSError:
-            if attempt < 7:
-                logger.warning(f'端口 {PORT} 被占用，等待重试 ({attempt + 1}/8)...')
+            if i < 7:
                 time.sleep(3)
             else:
                 raise
 
-    logger.info(f'轻量浏览器代理已启动，端口: {PORT} (命令解析模式，零 LLM 依赖)')
+    logger.info(f'Browser Agent 已启动 :{PORT} 模型={AI_MODEL} (GitHub免费)')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         server.shutdown()
-        logger.info('服务已停止')
-    except Exception as e:
-        logger.error(f'服务异常退出: {e}')
-        raise
 
 
 if __name__ == '__main__':
