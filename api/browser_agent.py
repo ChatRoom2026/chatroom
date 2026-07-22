@@ -144,7 +144,6 @@ def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
             browser = pw.chromium.launch(headless=True, args=[
                 '--no-sandbox', '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage', '--disable-gpu',
-                '--single-process',
             ])
             context = browser.new_context(
                 viewport={'width': 1280, 'height': 720},
