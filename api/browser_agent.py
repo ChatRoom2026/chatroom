@@ -13,6 +13,7 @@ import re
 import threading
 import logging
 import traceback
+import socketserver
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 from urllib.parse import quote
@@ -414,19 +415,26 @@ class AgentHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    # 允许端口重用，防止重启时 Address already in use
-    import socket as _socket
-    HTTPServer.allow_reuse_address = True
-    HTTPServer.allow_reuse_port = True
+    # 忽略 SIGCHLD 和 SIGPIPE，防止 Playwright 子进程退出导致主进程崩溃
+    import signal
+    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
-    for attempt in range(5):
+    # 允许端口重用
+    import socket as _socket
+    socketserver.TCPServer.allow_reuse_address = True
+    HTTPServer.allow_reuse_address = True
+
+    for attempt in range(8):
         try:
             server = HTTPServer(('0.0.0.0', PORT), AgentHandler)
             server.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            if hasattr(_socket, 'SO_REUSEPORT'):
+                server.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
             break
         except OSError:
-            if attempt < 4:
-                logger.warning(f'端口 {PORT} 被占用，等待重试 ({attempt + 1}/5)...')
+            if attempt < 7:
+                logger.warning(f'端口 {PORT} 被占用，等待重试 ({attempt + 1}/8)...')
                 time.sleep(3)
             else:
                 raise
