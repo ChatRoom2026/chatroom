@@ -414,6 +414,8 @@ class AgentHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    # 允许端口重用，防止重启时 Address already in use
+    HTTPServer.allow_reuse_address = True
     server = HTTPServer(('0.0.0.0', PORT), AgentHandler)
     logger.info(f'轻量浏览器代理已启动，端口: {PORT} (命令解析模式，零 LLM 依赖)')
     try:
