@@ -61,7 +61,7 @@ task_id = os.environ["TASK_ID"]
 output_file = os.environ["OUTPUT_FILE"]
 max_steps = int(os.environ.get("MAX_STEPS", "5"))
 
-SEARCH_ENGINE = "https://www.baidu.com/s?wd={query}"
+SEARCH_ENGINE = "https://www.bing.com/search?q={query}"
 
 def get_snapshot(page):
     try:
