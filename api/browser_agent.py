@@ -41,7 +41,7 @@ def call_ai(messages: list[dict]) -> str:
         raise RuntimeError(f'AI API 调用失败: {e}')
 
 # ---- 子进程隔离的浏览器任务 ----
-BROWSER_WORKER_SCRIPT = '''
+BROWSER_WORKER_SCRIPT = """
 import os, sys, json, time
 from playwright.sync_api import sync_playwright
 from urllib.parse import quote
@@ -212,7 +212,7 @@ try:
 except Exception as e:
     with open(output_file, "w") as f:
         json.dump({"status": "failed", "error": str(e)}, f)
-'''
+"""
 
 
 def run_browser_task(task_id: str, task_desc: str, max_steps: int = MAX_STEPS):
