@@ -36,6 +36,9 @@ const __dirname = path.dirname(__filename)
 
 const app = express()
 
+// ==================== 0) 关闭 X-Powered-By ====================
+app.disable('x-powered-by')
+
 // ==================== 1) 安全头 + CORS ====================
 app.use((req: Request, res: Response, next) => {
   // 安全头
@@ -44,13 +47,18 @@ app.use((req: Request, res: Response, next) => {
   res.setHeader('X-XSS-Protection', '1; mode=block')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
   res.setHeader('X-DNS-Prefetch-Control', 'off')
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' ws: wss:; font-src 'self'")
 
-  // CORS
-  const origin = req.headers.origin || '*'
-  res.setHeader('Access-Control-Allow-Origin', origin)
+  // CORS — 修复 Allow-Credentials 与 Allow-Origin 冲突
+  const origin = req.headers.origin
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Access-Control-Allow-Credentials', 'true')
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With')
-  res.setHeader('Access-Control-Allow-Credentials', 'true')
   if (req.method === 'OPTIONS') {
     res.setHeader('Content-Length', '0')
     res.statusCode = 204
@@ -76,6 +84,39 @@ app.use((req: Request, res: Response, next) => {
   }
   express.urlencoded({ extended: true, limit: '50mb' })(req, res, next)
 })
+
+// ==================== 2.5) 速率限制（防暴力破解） ====================
+const rateLimitMap = new Map<string, { count: number; reset: number }>()
+const RATE_LIMIT_WINDOW = 60_000 // 1 分钟
+const RATE_LIMIT_MAX = 60 // 每分钟最多 60 次请求
+const RATE_LIMIT_AUTH_MAX = 10 // 登录/注册每分钟最多 10 次
+
+app.use((req: Request, res: Response, next) => {
+  const key = req.ip || req.socket.remoteAddress || 'unknown'
+  const now = Date.now()
+  const entry = rateLimitMap.get(key)
+
+  if (entry && now < entry.reset) {
+    entry.count++
+    const isAuth = req.path.startsWith('/api/auth/')
+    const max = isAuth ? RATE_LIMIT_AUTH_MAX : RATE_LIMIT_MAX
+    if (entry.count > max) {
+      res.status(429).json({ success: false, error: '请求过于频繁，请稍后再试' })
+      return
+    }
+  } else {
+    rateLimitMap.set(key, { count: 1, reset: now + RATE_LIMIT_WINDOW })
+  }
+  next()
+})
+
+// 定期清理过期条目（每 5 分钟）
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, entry] of rateLimitMap) {
+    if (now > entry.reset) rateLimitMap.delete(key)
+  }
+}, 300_000)
 
 // ==================== 3) 智能 gzip 响应压缩 ====================
 // - 小于 1KB 的响应：不压缩（压缩开销 > 节省的传输）

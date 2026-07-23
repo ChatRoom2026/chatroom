@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /socket.io/
+Disallow: /uploads/
+Sitemap: /sitemap.xml
