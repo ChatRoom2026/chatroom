@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { request } from '@/lib/api'
-import { ArrowLeft, Trash2, Shield, Search, X, RefreshCw } from 'lucide-react'
+import { connectSocket } from '@/lib/socket'
+import { ArrowLeft, Trash2, Shield, Search, X, RefreshCw, LogIn } from 'lucide-react'
 
 interface AdminUser {
   id: number
@@ -33,6 +34,7 @@ export default function AdminPanel() {
   const [deleting, setDeleting] = useState<number | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<AdminUser | null>(null)
   const [error, setError] = useState('')
+  const [impersonating, setImpersonating] = useState<number | null>(null)
 
   const fetchUsers = useCallback(async (p: number, s: string) => {
     setLoading(true)
@@ -76,6 +78,27 @@ export default function AdminPanel() {
       setError(err.message || '删除失败')
     } finally {
       setDeleting(null)
+    }
+  }
+
+  const handleImpersonate = async (target: AdminUser) => {
+    setImpersonating(target.id)
+    try {
+      const res = await request<{ success: boolean; user: any; token: string }>('/admin/impersonate', {
+        method: 'POST',
+        body: JSON.stringify({ targetId: target.id }),
+      })
+      if (res.success && res.token) {
+        localStorage.setItem('token', res.token)
+        localStorage.setItem('user', JSON.stringify(res.user))
+        connectSocket(res.token)
+        useAuthStore.setState({ user: res.user, token: res.token, isLoggedIn: true })
+        navigate('/friends', { replace: true })
+      }
+    } catch (err: any) {
+      setError(err.message || '登录失败')
+    } finally {
+      setImpersonating(null)
     }
   }
 
@@ -192,14 +215,24 @@ export default function AdminPanel() {
                       {u.createdAt ? new Date(u.createdAt).toLocaleDateString('zh-CN') : '-'}
                     </span>
                     {u.id !== user?.id && (
-                      <button
-                        onClick={() => setConfirmDelete(u)}
-                        disabled={deleting === u.id}
-                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
-                        title="删除用户"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleImpersonate(u)}
+                          disabled={impersonating === u.id}
+                          className="p-2 text-gray-400 hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors disabled:opacity-50"
+                          title="登录为该用户"
+                        >
+                          <LogIn className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(u)}
+                          disabled={deleting === u.id}
+                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                          title="删除用户"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>

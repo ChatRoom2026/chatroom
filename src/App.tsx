@@ -7,7 +7,6 @@ import { useUnreadStore } from "@/store/unreadStore"
 import type { Message, GroupMessage } from "@/lib/api"
 import { requestNotificationPermission, showNotification } from "@/lib/notification"
 import { disconnectSocket } from "@/lib/socket"
-import { initAISocket } from "@/lib/ai"
 import AIPanel from "@/components/AIPanel"
 import Login from "@/pages/Login"
 import Register from "@/pages/Register"
@@ -213,12 +212,6 @@ export default function App() {
   useEffect(() => {
     init()
   }, [init])
-
-  useEffect(() => {
-    if (!isLoggedIn || !showAIPanel) return
-    const cleanup = initAISocket()
-    return cleanup
-  }, [isLoggedIn, showAIPanel])
 
   return (
     <Router>

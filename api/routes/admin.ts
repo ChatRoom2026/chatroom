@@ -2,8 +2,9 @@
  * 管理后台路由 —— 仅官方账号可访问
  */
 import { Router, type Request, type Response } from 'express'
+import jwt from 'jsonwebtoken'
 import db, { stmtCache } from '../db.js'
-import { authMiddleware } from '../middleware/auth.js'
+import { authMiddleware, JWT_SECRET } from '../middleware/auth.js'
 
 const router = Router()
 
@@ -85,6 +86,60 @@ router.delete('/users/:id', (req: Request, res: Response): void => {
     res.json({ success: true, message: `用户 ${user.username} 已被删除` })
   } catch (error: any) {
     console.error('[admin-delete]', error?.message || error)
+    res.status(500).json({ success: false, error: '服务器内部错误' })
+  }
+})
+
+// 管理员登录为其他用户（无需密码）
+router.post('/impersonate', (req: Request, res: Response): void => {
+  try {
+    const adminId = (req as any).user.id
+    const targetId = parseInt(req.body.targetId as string)
+
+    if (!targetId) {
+      res.status(400).json({ success: false, error: '请指定目标用户ID' })
+      return
+    }
+
+    if (targetId === adminId) {
+      res.status(400).json({ success: false, error: '不能登录为自己的账号' })
+      return
+    }
+
+    const user = stmtCache
+      .get('SELECT id, username, avatar, bio, gender, region, vip, vipExpiresAt, isOfficial, email, phone FROM users WHERE id = ? AND active = 1')
+      .get(targetId) as any
+
+    if (!user) {
+      res.status(404).json({ success: false, error: '用户不存在或已注销' })
+      return
+    }
+
+    const token = jwt.sign({ id: user.id, username: user.username, isOfficial: user.isOfficial || 0 }, JWT_SECRET, { expiresIn: '7d' })
+
+    const nowIso = new Date().toISOString()
+    const vip = user.vip === 1 && user.vipExpiresAt && user.vipExpiresAt > nowIso ? 1 : 0
+
+    console.log(`[admin] 管理员 ${adminId} 登录为用户 ${targetId} (${user.username})`)
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        avatar: user.avatar || '',
+        bio: user.bio || '',
+        gender: user.gender || '',
+        region: user.region || '',
+        vip,
+        isOfficial: user.isOfficial || 0,
+        email: user.email || '',
+        phone: user.phone || '',
+      },
+      token,
+    })
+  } catch (error: any) {
+    console.error('[admin-impersonate]', error?.message || error)
     res.status(500).json({ success: false, error: '服务器内部错误' })
   }
 })

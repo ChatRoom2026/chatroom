@@ -570,57 +570,6 @@ io.on('connection', (socket: any) => {
       socket.emit('online_count', count)
     })
 
-    // =============== 屿岸 · 浏览器代理事件 ===============
-    socket.on('ai_submit_task', async (data: { task: string; maxSteps?: number; source?: string; targetId?: string }) => {
-      try {
-        const agentUrl = process.env.BROWSER_AGENT_URL || 'http://localhost:3002'
-        const response = await fetch(`${agentUrl}/run`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            task: data.task,
-            max_steps: data.maxSteps || 10,
-            user_id: String(user.id),
-            source: data.source || 'chat',
-            target_id: data.targetId || '',
-          }),
-        })
-        const result = await response.json()
-        if (result.task_id) {
-          socket.emit('ai_task_submitted', {
-            taskId: result.task_id,
-            task: data.task,
-            status: 'pending',
-          })
-          // 广播到群聊或 AI 面板
-          socket.broadcast.emit('ai_task_submitted', {
-            taskId: result.task_id,
-            task: data.task,
-            userId: user.id,
-            username: user.username,
-            source: data.source,
-            targetId: data.targetId,
-            status: 'pending',
-          })
-        } else {
-          socket.emit('error', { message: result.error || 'AI 任务提交失败' })
-        }
-      } catch (err: any) {
-        socket.emit('error', { message: 'AI 服务未启动: ' + err.message })
-      }
-    })
-
-    socket.on('ai_query_task', async (data: { taskId: string }) => {
-      try {
-        const agentUrl = process.env.BROWSER_AGENT_URL || 'http://localhost:3002'
-        const response = await fetch(`${agentUrl}/status/${data.taskId}`)
-        const result = await response.json()
-        socket.emit('ai_task_status', result)
-      } catch (err: any) {
-        socket.emit('ai_task_status', { error: err.message })
-      }
-    })
-
     socket.on('disconnect', () => {
       const info = localSockets.get(socket.id)
       if (info) {

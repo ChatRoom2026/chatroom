@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { submitAITask, onAITaskUpdate, getAITasks, checkAIStatus, type AITask } from '../lib/ai'
+import { sendChatMessage, checkAIStatus, type ChatMessage } from '../lib/ai'
 
 interface Props {
   onClose: () => void
@@ -8,64 +8,37 @@ interface Props {
 export default function AIPanel({ onClose }: Props) {
   const [input, setInput] = useState('')
   const [aiOnline, setAiOnline] = useState<boolean | null>(null)
-  const [tasks, setTasks] = useState<AITask[]>([])
-  const [submitting, setSubmitting] = useState(false)
+  const [history, setHistory] = useState<ChatMessage[]>([])
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const tasksEndRef = useRef<HTMLDivElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     checkAIStatus().then((r) => setAiOnline(r.online))
-    setTasks(getAITasks())
-    const unsub = onAITaskUpdate((t) => {
-      setTasks((prev) => {
-        const idx = prev.findIndex((p) => p.taskId === t.taskId)
-        if (idx >= 0) {
-          const copy = [...prev]
-          copy[idx] = { ...copy[idx], ...t }
-          return copy
-        }
-        return [...prev, t]
-      })
-    })
-    return unsub
   }, [])
 
   useEffect(() => {
-    tasksEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [tasks])
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [history])
 
-  const handleSubmit = async () => {
-    const task = input.trim()
-    if (!task || submitting) return
-    setSubmitting(true)
-    setError('')
+  const handleSend = async () => {
+    const text = input.trim()
+    if (!text || loading) return
     setInput('')
-    const result = await submitAITask({ task, source: 'panel' })
-    if (!result.success) {
-      setError(result.error || '提交失败')
-    }
-    setSubmitting(false)
-  }
+    setError('')
 
-  const statusIcon = (s: string) => {
-    switch (s) {
-      case 'pending': return '⏳'
-      case 'running': return '▶️'
-      case 'completed': return '✅'
-      case 'failed': return '❌'
-      case 'stopped': return '⏹'
-      default: return '❓'
-    }
-  }
+    const userMsg: ChatMessage = { role: 'user', content: text }
+    setHistory((prev) => [...prev, userMsg])
+    setLoading(true)
 
-  const statusLabel = (s: string) => {
-    switch (s) {
-      case 'pending': return '等待中'
-      case 'running': return '执行中'
-      case 'completed': return '已完成'
-      case 'failed': return '失败'
-      case 'stopped': return '已停止'
-      default: return s
+    const result = await sendChatMessage(text, history)
+    setLoading(false)
+
+    if (result.success && result.reply) {
+      setHistory((prev) => [...prev, { role: 'assistant', content: result.reply }])
+    } else {
+      setError(result.error || '回复失败')
     }
   }
 
@@ -83,46 +56,43 @@ export default function AIPanel({ onClose }: Props) {
       </div>
 
       <div className="ai-panel-tasks">
-        {tasks.length === 0 && (
+        {history.length === 0 && (
           <div className="ai-empty">
-            <p>输入你想让 AI 帮你做的事情</p>
-            <p className="ai-examples">
-              例如：帮我搜索今日新闻、查看某网站价格、填写表单等
-            </p>
+            <p>你好，我是屿岸</p>
+            <p className="ai-examples">有什么想问的，尽管问我</p>
           </div>
         )}
-        {tasks.map((t) => (
-          <div key={t.taskId} className={`ai-task-card ${t.status}`}>
-            <div className="ai-task-header">
-              <span className="ai-task-icon">{statusIcon(t.status)}</span>
-              <span className="ai-task-status">{statusLabel(t.status)}</span>
-              <span className="ai-task-id">#{t.taskId}</span>
+        {history.map((msg, i) => (
+          <div key={i} className={`ai-chat-msg ${msg.role}`}>
+            <div className="ai-chat-bubble">
+              {msg.content}
             </div>
-            <div className="ai-task-body">{t.task}</div>
-            {t.result && (
-              <div className="ai-task-result">
-                <strong>结果：</strong>
-                {t.result.length > 300 ? t.result.slice(0, 300) + '...' : t.result}
-              </div>
-            )}
-            {t.error && <div className="ai-task-error">错误：{t.error}</div>}
           </div>
         ))}
-        <div ref={tasksEndRef} />
+        {loading && (
+          <div className="ai-chat-msg assistant">
+            <div className="ai-chat-bubble thinking">
+              <span className="ai-dot" />
+              <span className="ai-dot" />
+              <span className="ai-dot" />
+            </div>
+          </div>
+        )}
+        {error && <div className="ai-error">{error}</div>}
+        <div ref={messagesEndRef} />
       </div>
-
-      {error && <div className="ai-error">{error}</div>}
 
       <div className="ai-panel-input">
         <input
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder="输入想让 AI 完成的任务..."
-          disabled={submitting}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          placeholder="输入消息..."
+          disabled={loading}
         />
-        <button onClick={handleSubmit} disabled={submitting || !input.trim()}>
-          {submitting ? '...' : '发送'}
+        <button onClick={handleSend} disabled={loading || !input.trim()}>
+          {loading ? '...' : '发送'}
         </button>
       </div>
     </div>

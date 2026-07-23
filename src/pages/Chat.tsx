@@ -8,7 +8,8 @@ import { getSocket } from '@/lib/socket'
 import { MediaPreview } from '@/components/MediaPreview'
 import UserProfileModal from '@/components/UserProfileModal'
 import SafeImg from '@/components/SafeImg'
-import { ArrowLeft, Send, Paperclip, Image, FileText, Ban, X, UserPlus, Users, Edit2, LogOut, Crown, VideoIcon, Shield } from 'lucide-react'
+import AIPanel from '@/components/AIPanel'
+import { ArrowLeft, Send, Paperclip, Image, FileText, Ban, X, UserPlus, Users, Edit2, LogOut, Crown, VideoIcon, Shield, Bot } from 'lucide-react'
 
 export default function Chat() {
   const { friendId, groupId } = useParams<{ friendId: string; groupId: string }>()
@@ -28,6 +29,7 @@ export default function Chat() {
   const [showGroupMenu, setShowGroupMenu] = useState(false)
   const [showMembersModal, setShowMembersModal] = useState(false)
   const [selectedMember, setSelectedMember] = useState<{ id: number; username: string; avatar?: string; bio?: string; gender?: string; region?: string } | null>(null)
+  const [showAIPanel, setShowAIPanel] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<number | null>(null)
@@ -467,17 +469,26 @@ export default function Chat() {
           )}
         </div>
         {!isGroupMode && friend && friend.id !== user?.id && (
-          <button
-            onClick={() => setShowFriendInfo(true)}
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-            title="查看资料"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="5" r="1.5" />
-              <circle cx="12" cy="12" r="1.5" />
-              <circle cx="12" cy="19" r="1.5" />
-            </svg>
-          </button>
+          <>
+            <button
+              onClick={() => setShowAIPanel(!showAIPanel)}
+              className={`p-2 rounded-lg transition-colors ${showAIPanel ? 'bg-purple-600/30 text-purple-400' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+              title="屿岸 AI 助手"
+            >
+              <Bot className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setShowFriendInfo(true)}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="查看资料"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="5" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="12" cy="19" r="1.5" />
+              </svg>
+            </button>
+          </>
         )}
         {isGroupMode && (
           <div className="flex items-center gap-1">

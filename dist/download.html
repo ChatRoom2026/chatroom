@@ -133,33 +133,33 @@
     <p class="subtitle">选择你的平台，下载对应安装包</p>
 
     <div class="grid">
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/app-debug.apk">
+      <a class="card" href="/downloads/app-debug.apk">
         <div class="icon">📱</div>
         <div class="name">Android APK</div>
-        <div class="desc">手机版 · 直接下载安装</div>
-        <div class="size" id="size-apk">9.1 MB</div>
+        <div class="desc">手机版 · 直接安装</div>
+        <div class="size" id="size-apk">计算中...</div>
         <div class="badge">推荐</div>
       </a>
 
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/ChatRoom.Setup.1.0.0.exe">
+      <a class="card" href="/downloads/chatroom-windows.zip">
         <div class="icon">🪟</div>
         <div class="name">Windows</div>
-        <div class="desc">桌面版 · 下载后双击安装</div>
-        <div class="size" id="size-windows">102 MB</div>
+        <div class="desc">桌面版 · 下载后解压安装</div>
+        <div class="size" id="size-windows">计算中...</div>
       </a>
 
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/ChatRoom-1.0.0-arm64.dmg">
+      <a class="card" href="/downloads/chatroom-mac.zip">
         <div class="icon">🍎</div>
         <div class="name">macOS</div>
-        <div class="desc">桌面版 · 下载后拖入应用</div>
-        <div class="size" id="size-mac">125 MB</div>
+        <div class="desc">桌面版 · 下载后解压安装</div>
+        <div class="size" id="size-mac">计算中...</div>
       </a>
 
-      <a class="card" href="https://github.com/yaoyao5296/chatroom/releases/download/v1.0.0/ChatRoom-1.0.0.AppImage">
+      <a class="card" href="/downloads/chatroom-linux.zip">
         <div class="icon">🐧</div>
         <div class="name">Linux</div>
-        <div class="desc">桌面版 · 添加执行权限后运行</div>
-        <div class="size" id="size-linux">135 MB</div>
+        <div class="desc">桌面版 · 下载后解压安装</div>
+        <div class="size" id="size-linux">计算中...</div>
       </a>
     </div>
 
@@ -181,7 +181,10 @@
         }
       } catch {}
     }
-    // 文件大小已预设，无需动态获取
+    getFileSize('/downloads/app-debug.apk', 'size-apk')
+    getFileSize('/downloads/chatroom-windows.zip', 'size-windows')
+    getFileSize('/downloads/chatroom-mac.zip', 'size-mac')
+    getFileSize('/downloads/chatroom-linux.zip', 'size-linux')
 
     document.getElementById('updated-time').textContent = '更新于: ' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
   </script>
