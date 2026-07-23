@@ -7,7 +7,6 @@ import { api, resolveStaticUrl, type Message, type GroupMessage, type GroupInfo 
 import { getSocket } from '@/lib/socket'
 import { MediaPreview } from '@/components/MediaPreview'
 import UserProfileModal from '@/components/UserProfileModal'
-import SafeImg from '@/components/SafeImg'
 import AIPanel from '@/components/AIPanel'
 import { ArrowLeft, Send, Paperclip, Image, FileText, Ban, X, UserPlus, Users, Edit2, LogOut, Crown, VideoIcon, Shield, Bot } from 'lucide-react'
 

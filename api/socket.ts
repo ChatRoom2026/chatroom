@@ -258,10 +258,10 @@ async function handleGroupAITask(
       senderId: AI_BOT_ID,
       senderName: '屿岸',
       senderAvatar: '',
-      bio: 'AI 浏览器助手',
+      bio: 'AI 助手',
       gender: '',
       region: '',
-      content: `正在处理：${taskDesc.slice(0, 50)}${taskDesc.length > 50 ? '...' : ''}`,
+      content: `正在思考...`,
       type: 'text',
       fileUrl: '',
       timestamp: thinkTimestamp,
@@ -281,118 +281,64 @@ async function handleGroupAITask(
       }
     }
 
-    console.log(`[屿岸] 群聊 ${groupId} @${requesterName} 唤醒: ${taskDesc.slice(0, 50)}`)
+    console.log(`[屿岸] 群聊 ${groupId} @${requesterName}: ${taskDesc.slice(0, 50)}`)
 
-    const response = await fetch(`${agentUrl}/run`, {
+    // 调用 AI 聊天服务
+    const response = await fetch(`${agentUrl}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        task: taskDesc,
-        max_steps: 10,
-        user_id: String(requesterId),
-        source: 'group',
-        target_id: String(groupId),
+        message: taskDesc,
+        history: [],
       }),
     })
 
-    const result = await response.json()
+    const data = await response.json()
+    const replyContent = data.reply
+      ? `@${requesterName} ${data.reply}`.slice(0, 2000)
+      : `@${requesterName} 抱歉，我暂时无法回复`
 
-    if (result.task_id) {
-      let attempts = 0
-      const maxAttempts = 120
-      while (attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 2000))
-        const statusResp = await fetch(`${agentUrl}/status/${result.task_id}`)
-        const statusData = await statusResp.json()
-        const taskStatus = statusData.status
+    const replyTimestamp = new Date().toISOString()
+    const replyMsg = {
+      id: Date.now() + Math.random(),
+      groupId, senderId: AI_BOT_ID, senderName: '屿岸',
+      senderAvatar: '', bio: 'AI 助手',
+      gender: '', region: '',
+      content: replyContent, type: 'text', fileUrl: '',
+      timestamp: replyTimestamp, isAI: true,
+    }
 
-        if (taskStatus === 'completed' || taskStatus === 'failed') {
-              const replyContent = taskStatus === 'completed'
-                ? `@${requesterName} ${statusData.result || '任务完成'}`.slice(0, 2000)
-                : `@${requesterName} 抱歉，任务失败：${statusData.error || '未知错误'}`.slice(0, 2000)
+    // 保存到数据库
+    stmtInsertGroupMessage.run(groupId, AI_BOT_ID, replyContent, 'text', '', replyTimestamp)
 
-              const replyTimestamp = new Date().toISOString()
-              const replyMsg = {
-                id: Date.now() + Math.random(),
-                groupId, senderId: AI_BOT_ID, senderName: '屿岸',
-                senderAvatar: '', bio: 'AI 浏览器助手',
-                gender: '', region: '',
-                content: replyContent, type: 'text', fileUrl: '',
-                timestamp: replyTimestamp, isAI: true,
-              }
-
-              // 保存到数据库
-              stmtInsertGroupMessage.run(groupId, AI_BOT_ID, replyContent, 'text', '', replyTimestamp)
-
-              for (const m of members) {
-                const socketIds = getSocketIdsByUserId(m.userId)
-                for (const sid of socketIds) {
-                  io.to(sid).emit('new_group_message', replyMsg)
-                }
-              }
-              break
-            }
-        attempts++
+    for (const m of members) {
+      const socketIds = getSocketIdsByUserId(m.userId)
+      for (const sid of socketIds) {
+        io.to(sid).emit('new_group_message', replyMsg)
       }
-
-      if (attempts >= maxAttempts) {
-            const timeoutTimestamp = new Date().toISOString()
-            const timeoutMsg = {
-              id: Date.now() + Math.random(),
-              groupId, senderId: AI_BOT_ID, senderName: '屿岸',
-              senderAvatar: '',
-              content: `@${requesterName} 任务超时，请稍后重试`,
-              type: 'text', fileUrl: '',
-              timestamp: timeoutTimestamp, isAI: true,
-            }
-            stmtInsertGroupMessage.run(groupId, AI_BOT_ID, timeoutMsg.content, 'text', '', timeoutTimestamp)
-            for (const m of members) {
-              const socketIds = getSocketIdsByUserId(m.userId)
-              for (const sid of socketIds) {
-                io.to(sid).emit('new_group_message', timeoutMsg)
-              }
-            }
-          }
-        } else {
-          const errorTimestamp = new Date().toISOString()
-          const errorMsg = {
-            id: Date.now() + Math.random(),
-            groupId, senderId: AI_BOT_ID, senderName: '屿岸',
-            senderAvatar: '',
-            content: `@${requesterName} ${result.error || 'AI 服务未就绪'}`,
-            type: 'text', fileUrl: '',
-            timestamp: errorTimestamp, isAI: true,
-          }
-          stmtInsertGroupMessage.run(groupId, AI_BOT_ID, errorMsg.content, 'text', '', errorTimestamp)
-          for (const m of members) {
-            const socketIds = getSocketIdsByUserId(m.userId)
-            for (const sid of socketIds) {
-              io.to(sid).emit('new_group_message', errorMsg)
-            }
-          }
-        }
-      } catch (err: any) {
-        console.error('[屿岸/群聊] 错误:', err.message)
-        const errTimestamp = new Date().toISOString()
-        const errorMsg = {
-          id: Date.now() + Math.random(),
-          groupId, senderId: AI_BOT_ID, senderName: '屿岸',
-          senderAvatar: '',
-          content: 'AI 服务未启动，请检查配置',
-          type: 'text', fileUrl: '',
-          timestamp: errTimestamp, isAI: true,
-        }
-        stmtInsertGroupMessage.run(groupId, AI_BOT_ID, errorMsg.content, 'text', '', errTimestamp)
-        const members = stmtCache
-          .get('SELECT userId FROM group_members WHERE groupId = ?')
-          .all(groupId) as any[]
-        for (const m of members) {
-          const socketIds = getSocketIdsByUserId(m.userId)
-          for (const sid of socketIds) {
-            io.to(sid).emit('new_group_message', errorMsg)
-          }
-        }
+    }
+  } catch (err: any) {
+    console.error('[屿岸/群聊] 错误:', err.message)
+    const errTimestamp = new Date().toISOString()
+    const errorMsg = {
+      id: Date.now() + Math.random(),
+      groupId, senderId: AI_BOT_ID, senderName: '屿岸',
+      senderAvatar: '',
+      content: 'AI 服务未启动，请检查配置',
+      type: 'text', fileUrl: '',
+      timestamp: errTimestamp, isAI: true,
+    }
+    stmtInsertGroupMessage.run(groupId, AI_BOT_ID, errorMsg.content, 'text', '', errTimestamp)
+    const members = stmtCache
+      .get('SELECT userId FROM group_members WHERE groupId = ?')
+      .all(groupId) as any[]
+    for (const m of members) {
+      const socketIds = getSocketIdsByUserId(m.userId)
+      for (const sid of socketIds) {
+        io.to(sid).emit('new_group_message', errorMsg)
       }
+    }
+  }
 }
 
 io.on('connection', (socket: any) => {
